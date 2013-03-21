@@ -1,0 +1,1092 @@
+import pyfits
+#from pyfits import *
+from numpy import *
+#from matplotlib import *
+import matplotlib.pyplot as plt
+import pylab
+import PIL
+import time
+import ezfig  # morgan's plotting code
+import emcee
+
+from scipy import ndimage
+
+#magref = 18.85
+#AVparam = [0.5, 3.0, 0.2, 0.20443, (0.33669 - 0.20443)]
+#crange = [0.0, 2.5]
+#mrange = [25.0, 18.0]
+#nbins = [200., 200.]
+
+# new idea. "rotate" to frame where all "colors" are along reddening
+# vector. Rotate the -data- into this frame, once. Rotate the original
+# unreddened CMD -once-.  Then all convolutions are fast 1-d.
+
+def initialize_cmd():
+    
+    fn = '../Data/ir-sf-b21-v8-st.fits'
+
+    m110range = [16.0,26.0]
+    m160range = [18.4,26.0]
+    mrange = m160range
+    crange = [0.3,3.0]
+
+    # range for defining "narrow"
+    mfitrange = [18.7,22.5]
+    cfitrange = [0.3,2.0]
+    clo, mlo, ilo, cnar, mnar, inr,cm,cstd = isolate_low_AV_color_mag(
+        filename=fn, frac=0.05, mrange=mfitrange,d_arcsec=10.)
+
+    fracred = 0.5
+    medianAV = 1.5
+    muAV = 0.2
+    Amag_AV = 0.20443
+    Acol_AV = 0.33669 - 0.20443
+    AVparam = [fracred, medianAV, muAV, Amag_AV, Acol_AV]
+
+    t = arctan(-Amag_AV / Acol_AV)
+    c0 = 1.0
+    qnar = mnar + (cnar-c0)*sin(t)/cos(t)
+
+    plt.figure(1)
+    plt.clf()
+    cmdnarorig, extent, cedges, medges = display_CM_diagram(cnar,mnar,crange=crange,mrange=mrange,nbins=[50,50])
+
+    plt.figure(2)
+    plt.clf()
+    cmdnar, extent, cedges, medges = display_CM_diagram(cnar,qnar,crange=crange,mrange=mrange,nbins=[50,50])
+
+    plt.figure(3)
+    plt.clf()
+    masknar,meancol,sigcol = clean_fg_cmd(cmdnar,2.5,niter=4,showplot=0)
+    plt.imshow(cmdnar*masknar,extent=[cedges[0],cedges[-1],medges[-1],medges[0]], origin='upper',aspect='auto', interpolation='nearest')
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('Extinction Corrected F160W')
+    #plt.plot(cedges,medges[rint(meancol).astype(int)],color='yellow')
+    #plt.plot(cedges,medges[rint(meancol-3.0*sigcol).astype(int)],color='yellow')
+    #plt.plot(cedges,medges[rint(meancol+3.0*sigcol).astype(int)],color='yellow')
+
+    m1, m2, ra, dec = read_mag_position_gst(fn)
+    c = array(m1 - m2)
+    m = array(m2)
+    q = m + (c-c0)*sin(t)/cos(t)
+
+    plt.figure(4)
+    plt.clf()
+    clim = cedges[rint(meancol - 2.0*sigcol).astype(int)]
+    maskdata1 = make_data_mask(cmdnarorig,cedges,medges,m110range,m160range,clim)
+
+    plt.imshow(maskdata1,extent=[cedges[0],cedges[-1],medges[-1],medges[0]], origin='upper',aspect='auto', interpolation='nearest')
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('Extinction Corrected F160W')
+    plt.gca().autoscale(False)
+    plt.plot(c,m,',',color='yellow',alpha=0.2)
+    plt.imshow(maskdata1,extent=[cedges[0],cedges[-1],medges[-1],medges[0]], origin='upper',aspect='auto', interpolation='nearest',alpha=0.1)
+
+    plt.figure(5)
+    plt.clf()
+    maskdata2 = make_data_mask(cmdnar,    cedges,medges,m110range,m160range,clim,useq=[c0,t])
+    plt.imshow(maskdata2,extent=[cedges[0],cedges[-1],medges[-1],medges[0]], origin='upper',aspect='auto', interpolation='nearest')
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('Extinction Corrected F160W')
+    plt.gca().autoscale(False)
+    plt.plot(c,q,',',color='yellow',alpha=0.05)
+
+    plt.figure(6)
+    plt.clf()
+
+    t0=time.time()
+    fakecmd = makefakecmd(cmdnar*masknar, cedges, medges, AVparam, c0, SHOWPLOT=True)
+    print time.time() - t0
+
+def make_data_mask(fg_cmd,cedges,medges,m1range,m2range,clim,useq=0):
+    """
+    fg_cmd = image to make mask for
+    cedges, medges = values of color and magnitude along array sides
+    m1lims = 2 element vector for blue filter [bright,faint]  
+    m2lims = 2 element vector for red filter [bright,faint]   
+    useq = if set, assume fg_cmd is rotated to reddening free mags, 
+           and translate mag limits accordingly. Assume value = [c0,t]
+    clim = color to cut on blue side
+
+    Returns mask of 1's where data falls within magnitude limits
+    """
+    mask = 1.0 + zeros(fg_cmd.shape)
+
+    if useq != 0:
+        c0 = useq[0]
+        t = useq[1]
+        mlim2_faint  = m2range[1] + (cedges[:-1] - c0)*sin(t)/cos(t)
+        mlim2_bright = m2range[0] + (cedges[:-1] - c0)*sin(t)/cos(t)
+        mlim1_faint  = (m1range[1] - cedges[:-1]) + (cedges[:-1] - c0)*sin(t)/cos(t)
+        mlim1_bright = (m1range[0] - cedges[:-1]) + (cedges[:-1] - c0)*sin(t)/cos(t)
+    else:
+        mlim2_faint  = m2range[1] + 0.0*cedges[:-1]
+        mlim2_bright = m2range[0] + 0.0*cedges[:-1]
+        mlim1_faint  = (m1range[1] - cedges[:-1])
+        mlim1_bright = (m1range[0] - cedges[:-1])
+
+    nmag = fg_cmd.shape[0]
+    ncol = fg_cmd.shape[1]
+
+    mask = array([where((cedges[:-1] > clim[i]) & (medges[i] > mlim2_bright) & (medges[i] < mlim2_faint) & (medges[i] > mlim1_bright) & (medges[i] < mlim1_faint), 1.0, 0.0)   for i in range(nmag)])
+
+    return mask
+
+def clean_fg_cmd(fg_cmd, nsigvec, niter=4, showplot=0):
+    """
+    Line by line, fit for mean color and width of RGB, then mask 
+    outside of nsig[0] on blue and nsig[1] on red.
+    Fit iteratively, using rejection.
+    
+    Return mask (same dimensions as fg_cmd), and vector of mean color and width of RGB
+    """
+    #mask = 1.0 + numpy.zeros(fg_cmd.shape)
+    mask = 1.0 + zeros(fg_cmd.shape)
+
+    # Record size of array, in preparation for looping through magnitude bins
+
+    nmag = fg_cmd.shape[0]
+    ncol = fg_cmd.shape[1]
+
+    nsig_clip = 2.5
+    nanfix = 0.0000000000001
+    
+    for j in range(niter):
+
+        # Get mean color and width of each line
+
+        meancol = array([sum(arange(ncol) * fg_cmd[i,:] * mask[i,:]) / 
+                  sum(fg_cmd[i,:] * (mask[i,:] + nanfix)) for i in range(nmag)])
+        sigcol = array([sqrt(sum(fg_cmd[i,:]*mask[i,:]*(range(ncol) - meancol[i])**2) / 
+                       sum(fg_cmd[i,:]*mask[i,:] + nanfix)) for i in range(nmag)])
+
+        if showplot != 0:
+            plt.plot(meancol,range(nmag),color='blue')
+            plt.plot(meancol-nsigvec[0]*sigcol,range(nmag),color='red')
+            plt.plot(meancol+nsigvec[1]*sigcol,range(nmag),color='red')
+
+        # Mask the region near the RGB
+
+        mask = array([where(abs(range(ncol) - meancol[i]) < nsig_clip*sigcol[i], 1.0, 0.0) 
+                for i in range(nmag)])
+
+    # Regenerate mask using requested sigma clip
+
+    mask = array([where((range(ncol) - meancol[i] > -nsigvec[0] * sigcol[i]) &
+                        (range(ncol) - meancol[i] <  nsigvec[1] * sigcol[i]), 
+                        1.0, 0.0) 
+                  for i in range(nmag)])
+    
+    return mask, meancol, sigcol
+
+def makefakecmd(fg_cmd, cvec, mvec, AVparam, c0, floorfrac=0.0, 
+                mask = 1.0, SHOWPLOT=True, 
+                noise_model=0.0, noise_frac=0.0):
+    """
+    fg_cmd, cvec, mvec = 2-d binned CMD of lowreddening stars, binned
+            in color c & DEREDDENED magnitude m' =
+            m+(c-c0)*[A_1/(A_1-A_2)], and the bin coordinates. c0 is
+            arbitrary color coordinate around which the rotation such
+            that reddening is purely horizontal occured.  Inputs
+            calculated as fg_cmd, extent, cvec, mvec =
+            display_CM_diagram(c, m') with c, m derived from cnar,
+            mnar outputs of isolate_low_AV_color_mag, and cleaned of
+            points with unreasonable colors, and m' =
+            m+(c-c0)*[A_1/(A_1-A_2)].  
+
+            (write second function to generate a mask of where to compare data)
+    """
+    
+    # vectors defining mapping from array location to color and magnitude
+
+    crange = [cvec[0],cvec[-1]]
+    mrange = [mvec[0],mvec[-1]]
+    
+    dcol = cvec[1] - cvec[0]
+    dmag = mvec[1] - mvec[0]
+    
+    # set up reddening parameters
+    
+    fracred = AVparam[0]
+    medianAV = AVparam[1]
+    muAV = AVparam[2] * medianAV
+    Amag_AV = AVparam[3]
+    Acol_AV = AVparam[4]
+    
+    # translate color shifts into equivalent AV
+    
+    dEBV = dcol 
+    dAV = dEBV / Acol_AV
+    
+    # make log-normal convolution kernel
+    # (Note, currently does not integrate lg-normal over bin width)
+    
+    nmu = 5.0                # set range based on width of log normal
+
+    kernmaxEBV = Acol_AV * exp(nmu * muAV + log(medianAV))
+    nkern = int(kernmaxEBV / dEBV)
+    nkern = minimum(len(cvec), nkern) # make sure kernel size is <= size of array
+    nkern = maximum(1, nkern)        # make sure kernel size is > 0
+
+    # print 'Using reddening kernel of ',nkern,' elements'
+    kernmaxEBV = nkern * dEBV  # recalculate maximum 
+    EBVkern = arange(int(nkern), dtype=float) * dEBV
+    AVkern = EBVkern / Acol_AV
+    AVkern[0] = 1.0e-17
+    pAVkern = (1.0 / (AVkern*muAV*sqrt(2.0*3.1415926))) * exp(-0.5*(log(AVkern/medianAV)/muAV)**2)
+    pEBVkern = pAVkern / Acol_AV
+
+    # normalize the kernels
+
+    pEBVkernnorm = pEBVkern.sum()
+    pEBVkern = pEBVkern / pEBVkernnorm
+    pAVkernnorm = pAVkern.sum()
+    pAVkern = pAVkern / pAVkernnorm
+    
+    # zero out where not finite
+    
+    i = where (isfinite(pEBVkern) == False)
+    if len(i) > 0:
+        pEBVkern[i] = 0.0
+        pAVkern[i]  = 0.0
+    
+    # generate combined foreground + reddened CMD
+    
+    cmdorig = fg_cmd.copy()
+    
+    # sequentially shift cmd and co-add, weighted by pEBV
+    
+    dmagshift = dAV * Amag_AV / dmag
+    dcolshift = dAV * Acol_AV / dcol
+
+    cmdred = pAVkern[0] * fg_cmd.copy()
+
+    for i in range(1, len(pAVkern)):
+
+        cmdred[:,i:] += cmdorig[:,0:-i] * pAVkern[i] 
+
+    # combination of unreddened and unreddend cmd
+    cmdcombo = (1.0-fracred)*fg_cmd + fracred*cmdred
+
+    # add in noise model
+    #cmdcombo = (1.0 - noise_frac) * cmdcombo + noise_frac * noise_model
+    cmdcombo = cmdcombo + noise_model
+
+    # display commands
+
+    if SHOWPLOT:
+
+        plt.imshow(cmdcombo,extent=[crange[0],crange[1],mrange[1],mrange[0]], origin='upper',aspect='auto', interpolation='nearest')
+        plt.xlabel('F110W - F160W')
+        plt.ylabel('Extinction Corrected F160W')
+
+    # mask regions (defaults to *1 if mask not set in function call)
+    
+    #print 'cmdcombo.sum: ', cmdcombo.sum()
+    cmdcombo = cmdcombo * mask
+                              
+    # renormalize the entire PDF
+    
+    #print 'cmdcombo.sum: ', cmdcombo.sum()
+    #print 'dmag: ',dmag
+    #print 'dcol: ',dcol
+    #norm = cmdcombo.sum() * abs(dmag*dcol)
+    norm = cmdcombo.sum()
+    #print 'Renormalizing by: ', norm
+    cmdcombo = cmdcombo / norm
+    
+    # permit a constant offset in unmasked regions, to give non-zero probability
+    # of a random star.
+
+    if floorfrac > 0:
+
+       if len(array(mask).shape) == 0:
+           #masknorm = len(cmdcombo) * abs(dmag*dcol)
+           masknorm = len(cmdcombo)
+       else:
+           #masknorm = mask.sum() * abs(dmag*dcol)
+           masknorm = mask.sum()
+
+       #print 'Mask norm: ', masknorm
+
+       #print 'floorfrac: ', floorfrac
+       cmdcombo = mask*((1.0 - floorfrac) * cmdcombo + floorfrac*(mask/masknorm))
+    
+    # return cmd
+
+    return cmdcombo
+
+def get_star_indices(c_star, m_star, cedges, medges):
+    """
+    Input: list of star colors and magnitudes, and vectors of the 
+    edges returned by 2d histogram of the comparison CMD
+
+    Return: i_color and i_magnitude -- indices giving location within the comparison CMD
+    """
+
+    # calculate indices in image of star locations
+
+    dcol = cedges[1] - cedges[0]
+    dmag = medges[1] - medges[0]
+    i_c = floor((array(c_star) - cedges[0])/dcol)
+    i_m = floor((array(m_star) - medges[0])/dmag)
+    
+    return i_c.astype(int), i_m.astype(int)
+
+def makefakecmd_AVparamsonly(param):
+    """
+    Same as makefakecmd, but uses global parameters for most input
+    """
+
+    return makefakecmd(foreground_cmd, color_boundary, qmag_boundary,
+                       [param[0], param[1], param[2], 0.20443, (0.33669 - 0.20443)], 
+                       reference_color, floorfrac=floorfrac_value, 
+                       mask=color_qmag_datamask, SHOWPLOT=False,
+                       noise_model = noise_model)
+
+def cmdlikelihoodfunc(param, i_star_color, i_star_magnitude):
+    """
+    Return likelihood compared to dust model using param.
+    Passes parameters for dust model, and the color and magnitude
+    indices of stars (i.e., figure out which pixel of dusty CMD all 
+    stars fall in before the call -- do the masking in advance as well)
+    """
+
+    if (priors(param) == False):
+        return -inf
+
+    # calculate probability distribution
+
+    img = makefakecmd_AVparamsonly(param)
+    
+    # calculate log likelihood
+
+    pval = img[i_star_magnitude, i_star_color]
+
+    lnp =  (log(pval[where(pval > 0)])).sum()
+
+    #plt.imshow(img,extent=[0,54,38,0],origin='upper',aspect='auto',interpolation='nearest')
+    #plt.plot(i_star_color, i_star_magnitude, '*', color='yellow')
+
+    #print param, lnp
+
+    return lnp
+
+
+# read photometry file and return color and magnitude
+
+def read_col_mag(filename = '../Data/12056_M31-B15-F09-IR_F110W_F160W.st.fits'):
+    """
+    Reads fits file and returns color and magnitude for valid photometry 
+
+    color, mag2 = read_col_mag(fitsfilename)
+    """
+
+    fitstab = pyfits.open(filename)
+    mag1 = fitstab[1].data.field('MAG1_IR')
+    mag2 = fitstab[1].data.field('MAG2_IR')
+    fitstab.close()
+
+    i = where((mag1 < 30) & (mag2 < 30) & (mag1 > 10) & (mag2 > 10))
+
+    return mag1[i]-mag2[i], mag2[i]
+
+def read_mag_position(filename = '../Data/12056_M31-B15-F09-IR_F110W_F160W.st.fits'):
+    """
+    Reads fits file and returns magnitudes & position for valid photometry 
+
+    mag1, mag2, ra, dec = read_mag_position(fitsfilename)
+    """
+
+    fitstab = pyfits.open(filename)
+    # mag1 = fitstab[1].data.field('MAG1_IR')
+    # mag2 = fitstab[1].data.field('MAG2_IR')
+    # mag1 = fitstab[1].data.field('MAG1')
+    # mag2 = fitstab[1].data.field('MAG2')
+    mag1 = fitstab[1].data.field('ir_MAG1')
+    mag2 = fitstab[1].data.field('ir_MAG2')
+    ra   = fitstab[1].data.field('RA')
+    dec   = fitstab[1].data.field('DEC')
+    fitstab.close()
+
+    # cul 
+    i = where((mag1 < 30) & (mag2 < 30) & (mag1 > 10) & (mag2 > 10))
+
+    return mag1[i], mag2[i], ra[i], dec[i]
+
+def read_mag_position_gst(filename = '../Data/sixfilt-b18-v8-st-large.fits'):
+    """
+    Reads fits file and returns magnitudes & position for valid photometry 
+    Applies cuts to mimic GST
+
+    mag1, mag2, ra, dec = read_mag_position(fitsfilename)
+    """
+
+    fitstab = pyfits.open(filename)
+    # mag1 = fitstab[1].data.field('MAG1_IR')
+    # mag2 = fitstab[1].data.field('MAG2_IR')
+    # mag1 = fitstab[1].data.field('MAG1')
+    # mag2 = fitstab[1].data.field('MAG2')
+    mag1 = fitstab[1].data.field('ir_MAG1')
+    mag2 = fitstab[1].data.field('ir_MAG2')
+    ra   = fitstab[1].data.field('RA')
+    dec   = fitstab[1].data.field('DEC')
+    round1 = fitstab[1].data.field('ir_round1')
+    round2 = fitstab[1].data.field('ir_round2')
+    sharp1 = fitstab[1].data.field('ir_sharp1')
+    sharp2 = fitstab[1].data.field('ir_sharp2')
+    snr1 = fitstab[1].data.field('ir_snr1')
+    snr2 = fitstab[1].data.field('ir_snr2')
+    crowd1 = fitstab[1].data.field('ir_crowd1')
+    crowd2 = fitstab[1].data.field('ir_crowd2')
+    inbrick = fitstab[1].data.field('inbrick')
+    fitstab.close()
+
+    # cul 
+    redsnrthresh = 5.0
+    bluesnrthresh = 5.0
+    sharpthresh1 = 0.3
+    sharpthresh2 = -0.05 # eliminates a lot of stars
+    # sharpthresh3 = -0.1 + round1 * 0.02 Eliminated (sharp1 > sharpthresh3)
+    # sharpthresh4 = -0.1 + round2 * 0.02 Eliminated (sharp2 > sharpthresh4)
+    # roundthresh1 = -0.25  Eliminates almost no stars (round1 > roundthresh1)
+    #  roundthresh2 = 7  ELIMINATED! BIG COMPLETENESS HIT (round < roundthresh2)
+    i = where((mag1 < 30) & (mag2 < 30) & (mag1 > 10) & (mag2 > 10) & 
+              (snr1 > bluesnrthresh) & (snr2 > redsnrthresh) & 
+              (abs(sharp1) < sharpthresh1) & (abs(sharp2) < sharpthresh1) & 
+              (sharp1 > sharpthresh2) & (sharp2 > sharpthresh2))
+    print 'Cutting from ', len(mag1), ' to ', len(i)
+
+    return mag1[i], mag2[i], ra[i], dec[i]
+
+
+def read_mag_position_gst_allparam(filename = '../Data/sixfilt-b18-v8-st-large.fits'):
+    """
+    Reads fits file and returns magnitudes & position for valid photometry 
+    Applies cuts to mimic GST
+
+    mag1, mag2, ra, dec, crowd1, crowd2, round1, round2, sharp1, sharp2  = read_mag_position_gst_allparam(fitsfilename)
+    """
+
+    fitstab = pyfits.open(filename)
+    # mag1 = fitstab[1].data.field('MAG1_IR')
+    # mag2 = fitstab[1].data.field('MAG2_IR')
+    # mag1 = fitstab[1].data.field('MAG1')
+    # mag2 = fitstab[1].data.field('MAG2')
+    mag1 = fitstab[1].data.field('ir_MAG1')
+    mag2 = fitstab[1].data.field('ir_MAG2')
+    ra   = fitstab[1].data.field('RA')
+    dec   = fitstab[1].data.field('DEC')
+    round1 = fitstab[1].data.field('ir_round1')
+    round2 = fitstab[1].data.field('ir_round2')
+    sharp1 = fitstab[1].data.field('ir_sharp1')
+    sharp2 = fitstab[1].data.field('ir_sharp2')
+    snr1 = fitstab[1].data.field('ir_snr1')
+    snr2 = fitstab[1].data.field('ir_snr2')
+    crowd1 = fitstab[1].data.field('ir_crowd1')
+    crowd2 = fitstab[1].data.field('ir_crowd2')
+    inbrick = fitstab[1].data.field('inbrick')
+    fitstab.close()
+
+    # cul 
+    snrthresh = 4.0
+    sharpthresh = 0.3
+    sharpthresh2 = -0.075
+    roundthresh1 = -0.25
+    roundthresh2 = 6
+    i = where((mag1 < 30) & (mag2 < 30) & (mag1 > 10) & (mag2 > 10) & (snr1 > snrthresh) & (snr2 > snrthresh) & (abs(sharp1)<sharpthresh) & (abs(sharp2)<sharpthresh))
+    print 'Cutting from ', len(mag1), ' to ', len(i)
+
+    return mag1[i], mag2[i], ra[i], dec[i], crowd1[i], crowd2[i], round1[i], round2[i], sharp1[i], sharp2[i]
+
+def split_ra_dec(ra, dec, d_arcsec=10.0): 
+    """
+    indices, ra_bins, dec_bins = split_ra_dec(ra, dec, d_arcsec=10.0)
+
+    Takes lists of ra and dec, divides the list into pixels of width
+    d_arcsec, and returns an array, where each entry is a list of the
+    indices from the original ra, dec list whose ra and dec fell into
+    that pixel. Also returns the boundaries of the bins used to
+    generate the index array. (Functions like reverse indices in IDL's
+    histogram function)
+
+    To setup: 
+    filename = '../Data/12056_M31-B15-F09-IR_F110W_F160W.st.fits'
+    fitstab = pyfits.open(filename)
+    ra  = fitstab[1].data.field('RA') 
+    dec = fitstab[1].data.field('DEC')
+    fitstab.close()
+    """
+    # figure out ranges
+    ra_min =  nanmin(ra)
+    ra_max =  nanmax(ra)
+    dec_min = nanmin(dec)
+    dec_max = nanmax(dec)
+
+    # find center
+    ra_cen = (ra_max - ra_min) / 2.0
+    dec_cen = (dec_max - dec_min) / 2.0
+
+    # figure out number of bins, rounding up to nearest integer
+    d_ra  = (d_arcsec / cos(math.pi * dec_cen / 180.0)) / 3600.0
+    d_dec =  d_arcsec / 3600.0
+    n_ra  = int((ra_max - ra_min)   / d_ra  + 1.0)
+    n_dec = int((dec_max - dec_min) / d_dec + 1.0)
+
+    # calculate histogram bin edges
+    # ra_bins  = ra_min  + d_ra  * arange(n_ra  + 1, dtype=float)
+    # dec_bins = dec_min + d_dec * arange(n_dec + 1, dtype=float)
+    ra_bins  = linspace(ra_min, ra_min  + n_ra*d_ra,   num=n_ra+1)
+    dec_bins = linspace(dec_min,dec_min + n_dec*d_dec, num=n_dec+1) 
+    # print 'RA Range:  ', ra.min(), ra.max()
+    # print 'Dec Range: ', dec.min(), dec.max()
+    print 'RA Range:  ',ra_bins.min(), ra_bins.max()
+    print 'Dec Range: ', dec_bins.min(), dec_bins.max()
+    
+    
+    # recalculate maximums and center, since range is not necessarily 
+    # an integer multiple of d_arcsec
+    ra_max  = ra_bins.max()
+    dec_max = dec_bins.max()
+    ra_cen = (ra_max - ra_min) / 2.0
+    dec_cen = (dec_max - dec_min) / 2.0
+
+    # get indices falling into each pixel in ra, dec bins
+
+    raindex  = digitize(ra,  ra_bins) - 1
+    decindex = digitize(dec, dec_bins) - 1
+
+    # generate n_ra by n_dec array of lists, giving indices in each bin
+
+    indices = empty( (n_ra,n_dec), dtype=object )
+    for (i,j), value in ndenumerate(indices):
+        indices[i,j]=[]
+
+    # populate the array with the indices in each bin
+    for k in range(len(ra)):
+        indices[raindex[k],decindex[k]].append(k)
+    
+    print 'Generated indices in array of dimensions', indices.shape
+    print 'Median number of stars per bin: ', median([len(indices[x,y]) for (x,y),v in ndenumerate(indices) if (len(indices[x,y]) > 1)])
+
+    return indices, ra_bins, dec_bins
+
+def median_rgb_color_map(indices,c,m,mrange=[18.8,22.5],crange=[0.3,2.5],rgbparam=[22.0, 0.74, -0.13, -0.012]):
+    """
+    Return array of median NIR color of RGB in range, and standard
+    deviation, relative to fiducial curve, and list of the good pixel
+    values.
+    
+    indices = array of indices in RA, Dec bins (from split_ra_dec()) 
+    c, m = list of colors,magnitudes referred to by indices in i 
+    mrange = restrict to range of magnitudes
+    rgbparam = 2nd order polynomial of RGB location [magref, a0, a1, a2]
+
+    cmap, cmapgoodvals, cstdmap, cstdmapgoodvals = median_rgb_color_map(indices,c,m,mrange=[19,21.5])
+
+    to display:
+    plt.imshow(cmap,interpolation='nearest')
+    plt.hist(cmapgoodvals, cumulative=True,histtype='step',normed=1)
+    """
+
+    # fiducial approximation of isochrone to flatten RGB to constant color
+    magref = rgbparam[0]
+    a = rgbparam[1:4]
+    cref = a[0] + a[1]*(m-magref) + a[2]*(m-magref)**2
+    dc = c - cref
+
+    # initialize color map
+    emptyval = -1
+    cmap    = empty( indices.shape, dtype=float )
+    cstdmap = empty( indices.shape, dtype=float )
+
+    # calculate median number of stars per bin, to set threshold for
+    # ignoring partially filled ra-dec pixels.
+    n_per_bin = median([len(indices[x,y]) for (x,y),v in ndenumerate(indices) if (len(indices[x,y]) > 1)])
+    n_thresh = n_per_bin - 7*sqrt(n_per_bin)
+    
+    print 'Dimension of Color Map: ',cmap.shape
+    for (i,j), value in ndenumerate(indices):
+        # if indices[i,j]!= []:
+        if (len(indices[i,j]) > n_thresh):
+            dctmp = dc[indices[i,j]]
+            ctmp  = c[indices[i,j]]
+            mtmp  = m[indices[i,j]]
+            cmap[i,j] = median(dctmp.compress(((mtmp > mrange[0]) & (mtmp<mrange[1]) & (ctmp > crange[0]) & (ctmp<crange[1])).flat))
+            cstdmap[i,j] = std(dctmp.compress(((mtmp > mrange[0]) & (mtmp<mrange[1]) & (ctmp > crange[0]) & (ctmp<crange[1])).flat))
+        else:
+            cmap[i,j] = emptyval
+            cstdmap[i,j] = emptyval
+        #else:
+        #    cmap[i,j] = emptyval
+
+    # calculate list of good values
+    igood = where(cmap > -1)
+    print 'Median Color offset:', median(cmap[igood])
+
+    return cmap, cmap[igood], cstdmap, cstdmap[igood]
+
+
+def isolate_low_AV_color_mag(filename = '../Data/12056_M31-B15-F09-IR_F110W_F160W.st.fits',frac=0.2,mrange=[19,21.5],rgbparam=[22.0, 0.74, -0.13, -0.012],d_arcsec=10):
+    """
+    Return a list of color and magnitude for stars in the frac of low
+    extinction pixels defined by either blueness or narrowness of RGB.
+
+    cblue,mblue,iblue,cnarrow,mnarrow,inarrow,cmap,cstdmap = isolate_low_AV_color_mag(filename, fraction, mrange, rgbparam)
+
+    filename = FITS file of stellar parameters
+    fraction = return stars that fall in the fraction of pixels with bluest RGB
+    mrange = F160W magnitude range for evaluating color of RGB
+    rgbparam = polynomial approximation of color of RGB = [magref,a0,a1,a2]
+
+    cblue,mblue,iblue = color, magnitude, and indices of stars in the
+                        bluest bins
+    cnarrow,mnarrow,inarrow = same, but for narrowest RGB bins
+    cmap = 2d array of RGB color
+    cstd = 2d array of RGB width
+
+    """
+    #m1, m2, ra, dec = read_mag_position(filename)
+    m1, m2, ra, dec = read_mag_position_gst(filename)
+    c = array(m1 - m2)
+    m = array(m2)
+
+    # cut out main sequence stars
+    crange = [0.3, 2.0]
+
+    indices, rabins, decbins = split_ra_dec(ra, dec, d_arcsec)
+
+    cm,cmlist,cstd,cstdlist = median_rgb_color_map(indices,c,m,mrange,crange,rgbparam)
+    print 'Number of valid areas in color map: ', len(cmlist)
+
+    # find bluest elements
+    cmlist.sort()
+    n_cm_thresh = int(frac * (len(cmlist) + 1))
+    cmthresh = cmlist[n_cm_thresh]
+    cmnodataval = -1
+    
+    # find elements with the narrowest color sequence
+    cstdlist.sort()
+    n_cstd_thresh = int(frac * (len(cstdlist) + 1))
+    cstdthresh = cstdlist[n_cstd_thresh]
+    cstdnodataval = -1
+    
+    ikeep_blue = []
+    for (x,y), value in ndenumerate(cm): 
+        if ((cm[x,y] < cmthresh) & (cm[x,y] > cmnodataval)) :
+            ikeep_blue.extend(indices[x,y])
+
+    ikeep_narrow = []
+    for (x,y), value in ndenumerate(cm): 
+        if ((cstd[x,y] < cstdthresh) & (cm[x,y] > cmnodataval)) :
+            ikeep_narrow.extend(indices[x,y])
+
+    # plt.clf()
+    # plt.axis([-0.5, 1.9, 26, 17])    
+    # plt.plot(c,m,'r,')
+    # plt.plot(c[ikeep_blue],m[ikeep_blue],'b,')
+    # plt.plot(c[ikeep_narrow],m[ikeep_narrow],'y,')
+
+    print 'Blue: Returning ', len(ikeep_blue),' out of ',len(c),' stars from ',n_cm_thresh,' bins.'
+
+    print 'Narrow: Returning ', len(ikeep_narrow),' out of ',len(c),' stars from ',n_cstd_thresh,' bins.'
+    return c[ikeep_blue], m[ikeep_blue], ikeep_blue, c[ikeep_narrow], m[ikeep_narrow], ikeep_narrow, cm, cstd
+
+
+def display_CM_diagram(c,m,crange=[-1,3],mrange=[26,16],nbins=[50,50],alpha=1.0):
+    """
+    Plot binned CMD, and return the binned histogram, extent vector, cbins, mbins
+    """
+        
+    h, xedges, yedges = histogram2d(m, c, range=[sort(mrange), crange], bins=nbins)
+    extent = [yedges[0], yedges[-1], xedges[-1], xedges[0]]
+    plt.imshow(log(h),  extent=extent, origin='upper', aspect='auto', interpolation='nearest',alpha=alpha)
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('F160W')
+    print h.shape
+
+    return h, extent, yedges, xedges
+
+def color_sigma_vs_mag(c,m,magrange=[18.5,24.0],nperbin=50):
+    """
+    Return color dispersion vs magnitude, calculated in bins with
+    constant numbers of stars, limited to magrange
+    
+    cdisp, mbins_disp = color_sigma_vs_mag(colorlist,maglist,magrange,nperbin)
+    """
+
+    # sort into ascending magnitude
+    isort = argsort(m)
+    
+    # take groups of nperbin, and calculate the interquartile range in
+    # color, and the median magnitude of the group.
+    nout = int(len(c)/nperbin)
+    mmed = empty(nout,dtype=float)
+    cvar = empty(nout,dtype=float)
+    for i in range(nout):
+        k = i * nperbin + arange(nperbin)
+        mmed[i] = median(m[isort[k]])
+        ctmp = array(c[isort[k]])  # make numpy array
+        cmed = median(ctmp)
+        c25 = median(ctmp.compress(ctmp <= cmed))
+        c75 = median(ctmp.compress(ctmp > cmed))
+        cvar[i] = (c75 - c25) / (2.0 * 0.6745)
+    
+    return cvar, mmed
+
+
+################################################
+# global parameters setting up foreground CMD
+
+fn = '../Data/ir-sf-b21-v8-st.fits'
+m110range = [16.0,25.0]
+m160range = [18.4,24.5]  # just below RC
+m160range = [18.4,24.0]  # middle of RC
+#m160range = [18.4,23.25] # just above RC -- worse constraints on AV
+
+fn = '../Data/ir-sf-b17-v8-st.fits'
+fn = '/astro/store/angst4/dstn/v8/ir-sf-b17-v8-st.fits'
+m110range = [16.0,24.0]
+m160range = [18.4,24.0]
+
+crange    = [0.3,3.0]
+mfitrange = [18.7,21.3]
+deltapix_approx =  [0.05,0.2]
+nbins = [int((m160range[1] - m160range[0]) / deltapix_approx[1]),
+         int((crange[1] - crange[0]) / deltapix_approx[0])]
+Amag_AV = 0.20443
+Acol_AV = 0.33669 - 0.20443
+t = arctan(-Amag_AV / Acol_AV)
+reference_color = 1.0
+floorfrac_value = 0.05
+
+# generate foreground CMD in reddening free magnitudes
+
+clo, mlo, ilo, cnar, mnar, inr, cm, cstd = isolate_low_AV_color_mag(
+                    filename=fn, frac=0.025, mrange=mfitrange, d_arcsec=10.)
+
+qnar = mnar + (cnar-reference_color)*sin(t)/cos(t)
+
+foreground_cmd_orig, qmag_boundary, color_boundary = histogram2d(qnar, cnar, 
+                                 range=[sort(m160range), crange], bins=nbins)
+foregroundmask, meancol, sigcol = clean_fg_cmd(foreground_cmd_orig, [3.0,3.5], 
+                                               niter=4, showplot=0)
+# clean up foreground mask...
+foreground_cmd = foreground_cmd_orig * foregroundmask
+
+# make the noise model by masking out foreground and smoothing
+noisemask, meancol, sigcol = clean_fg_cmd(foreground_cmd_orig, [4.5,4.5], 
+                                          niter=5, showplot=0)
+noisemask = abs(noisemask - 1)
+noise_smooth = [3, 10]  # mag, color
+noise_model_orig = foreground_cmd_orig * noisemask
+noise_model = ndimage.filters.uniform_filter(noise_model_orig,
+                                             size=noise_smooth)
+
+
+# generate mask of data regions to ignore
+
+nsig_blue_color_cut = 2.0
+bluecolorlim = color_boundary[maximum(rint(meancol - nsig_blue_color_cut * sigcol).astype(int),0)]
+color_qmag_datamask = make_data_mask(foreground_cmd, color_boundary, qmag_boundary, m110range, m160range, bluecolorlim,useq=[reference_color,t])
+
+# relative normalization of foreground model and noise model
+nfg = (foreground_cmd * color_qmag_datamask).sum()
+nnoise = (noise_model * color_qmag_datamask).sum()
+frac_noise = nnoise / (nnoise + nfg)
+print 'Noise fraction: ', frac_noise
+
+# read in main data file
+m1, m2, ra, dec = read_mag_position_gst(fn)
+m = array(m2)
+c = array(m1 - m2)
+q = m + (c-reference_color)*sin(t)/cos(t)
+ra = array(ra)
+dec = array(dec)
+
+# exclude data outside the range
+igood = where((c > color_boundary[0]) & (c < color_boundary[-1]) &
+              (q > qmag_boundary[0]) & (q < qmag_boundary[-1]))
+m = m[igood]
+c = c[igood]
+q = q[igood]
+ra = ra[igood]
+dec = dec[igood]
+
+# exclude data outside the data mask
+i_c, i_q = get_star_indices(c, q, color_boundary, qmag_boundary)
+igood = where(color_qmag_datamask[i_q, i_c] != 0)
+m = m[igood]
+c = c[igood]
+q = q[igood]
+ra = ra[igood]
+dec = dec[igood]
+i_c = i_c[igood]
+i_q = i_q[igood]
+
+# split into RA-Dec
+binarcsec = 15.0
+i_ra_dec_vals, ra_bins, dec_bins = split_ra_dec(ra, dec, d_arcsec = binarcsec)
+
+# grab data for a test bin
+i_test_ra = 60
+i_test_dec = 20
+#i_test_ra = 83
+#i_test_dec = 1
+ctest = c[i_ra_dec_vals[i_test_ra,i_test_dec]]
+mtest = m[i_ra_dec_vals[i_test_ra,i_test_dec]]
+qtest = q[i_ra_dec_vals[i_test_ra,i_test_dec]]
+i_ctest, i_qtest = get_star_indices(ctest, qtest, color_boundary, qmag_boundary)
+
+def get_ra_dec_bin(i_ra=60, i_dec=20):
+    
+    i_ctest, i_qtest = get_star_indices(c[i_ra_dec_vals[i_ra,i_dec]], 
+                                        q[i_ra_dec_vals[i_ra,i_dec]], 
+                                        color_boundary, qmag_boundary)
+    return i_ctest, i_qtest
+
+def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
+                       nwalkers=100, nsamp=15, nburn=200):
+
+    i_ra_dec_vals, ra_bins, dec_bins = split_ra_dec(ra, dec, 
+                                                    d_arcsec = d_arcsec)
+
+    bestfit_values    = array(i_ra_dec_vals)
+    percentile_values = array(i_ra_dec_vals)
+
+    #for i_ra in range(len(ra_bins)-1):
+    #for i_ra in [83, 84]:  # 10 arcsec bins
+    #for i_ra in [55, 56]:
+    for i_ra in [30, 31]:
+
+        param_init = [0.5, 0.5, 0.1]
+
+        #for i_dec in range(len(dec_bins)-1):
+        for i_dec in range(10):
+
+            i_c, i_q = get_star_indices(c[i_ra_dec_vals[i_ra, i_dec]], 
+                                        q[i_ra_dec_vals[i_ra, i_dec]], 
+                                        color_boundary, qmag_boundary)
+
+            if len(i_c) > nmin: 
+                samp, d, bestfit, sigma = run_emcee(i_c, i_q,
+                                                    param_init,
+                                                    nwalkers, nsamp, 
+                                                    burncut=nburn)
+                bestfit_values[i_ra, i_dec] = bestfit
+                percentile_values[i_ra, i_dec] = sigma
+                
+                plot_mc_results(d, bestfit, datamag=i_q, datacol=i_c)
+            else:
+                bestfit_values[i_ra, i_dec] = [-1, -1, -1]
+                percentile_values[i_ra, i_dec] = [[-1, -1, -1],
+                                                  [-1, -1, -1],
+                                                  [-1, -1, -1]]
+                
+            print i_ra, i_dec, bestfit_values[i_ra, i_dec]
+
+    return bestfit_values, percentile_values
+
+    
+
+
+################################
+
+def priors(p):
+    
+    p0 = [0.25, 0.75]          # fracred -- red fraction
+    p1 = [0.0001, 6.0]        # median A_V
+    p2 = [0.001, 0.5]         # mu/A_V (lognormal width -- 
+                             # high mu was alway sign of bad fit)
+
+    #print p[0], p[1], p[2]
+    good = ((p0[0] <= p[0]) & (p[0] <= p0[1]) & 
+            (p1[0] <= p[1]) & (p[1] <= p1[1]) & 
+            (p2[0] <= p[2]) & (p[2] <= p2[1]))
+
+    return good
+
+
+def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2], nwalkers=100, nsteps=20, burncut=100):
+
+    # setup emcee
+
+    ndim = len(param)
+    #nsteps = 200
+    #ndim, nwalkers = 3, 40
+    #param = [0.5, 1.5, 0.5]
+
+    assert(priors(param)), "First Guess outside the priors"
+
+    p0 = [param*(1. + random.normal(0, 0.01, ndim)) for i in xrange(nwalkers)]
+    
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, cmdlikelihoodfunc, args=[i_color,i_qmag])
+    pos, prob, state = sampler.run_mcmc(p0, burncut)
+    sampler.reset()
+    sampler.run_mcmc(pos, nsteps)
+
+    # Correlation function values -- keep at least this many nsteps x 2
+    # print sampler.acor
+
+    names = ['frac', 'A_V', 'mu']
+    #d = { k: sampler.flatchain[:,e] for e, k in enumerate(names) }
+    #d = dict(zip([ (k, sampler.flatchain[:,e]) for e, k in enumerate(names) ]))
+    d = dict((k, sampler.flatchain[:,e]) for e, k in enumerate(names))
+    d['lnp'] = sampler.lnprobability.flatten()
+    idx = d['lnp'].argmax()
+
+    bestfit = [d[names[k]][idx] for k in range(3)]
+    percval = [16, 50, 84]
+    sigma = [percentile(d[names[k]], percval) for k in range(3)]
+
+    #for k in range(3):
+    #    print k, names[k], d[names[k]][idx], sigma[k]
+
+    #plt.plot(s.flatchain[:,1], s.lnprobability.flatten(), 'o')
+
+    return sampler, d, bestfit, sigma
+
+
+def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0):
+
+    ##  morgan's plotting code, takes standard keywords
+    #ezfig.plotCorr(d, d.keys())
+    # ezfig.plotMAP(d, d.keys())
+
+    plt.figure(1)
+    plt.clf()
+    ezfig.plotCorr(d, d.keys(), plotfunc=ezfig.plotDensity, bins=50)
+    plt.draw()
+
+    plt.figure(2)
+    plt.clf()
+    for e, (k, v) in enumerate(d.items()):
+        ax = plt.subplot(2,2,e+1)
+        ezfig.plotMAP(v, ax=ax, frac=[0.65, 0.95, 0.975], hpd=False)
+        ax.set_xlabel(k)
+    plt.draw()
+
+    model = array(makefakecmd_AVparamsonly(bestfit))
+    extent = [color_boundary[0], color_boundary[-1],
+              qmag_boundary[-1], qmag_boundary[0]]
+
+    #plt.figure(3)
+    #plt.clf()
+
+    if len(datamag) > 1:
+
+        fig = plt.figure(3, figsize=(9,9))
+        plt.clf()
+        
+        #fig, (axs) = plt.subplots(ncols=2, nrows=2, squeeze=False,
+        #                            figsize=(9,9))
+
+        #ax = axs[0][0]
+        plt.subplot(2,2,1)
+
+        im = plt.imshow(model,  extent=extent, origin='upper', aspect='auto', 
+                       interpolation='nearest')
+        plt.xlabel('F110W - F160W')
+        plt.ylabel('Extinction Corrected F160W')
+        plt.title('Model')
+        #plt.colorbar(im)
+
+        #plt.gca().autoscale(False)
+        #plt.plot(datamag, datacol,',',color='yellow',alpha=0.2)
+
+        imgsize = model.shape
+        rangevec = [[0, imgsize[0]], [0, imgsize[1]]]
+        dataimg, junk1, junk2 = histogram2d(datamag, datacol, 
+                                            range=rangevec,
+                                            bins=nbins)
+        #print 'Data sum: ', dataimg.sum()
+        dataimg = dataimg / dataimg.sum()
+
+        #ax = axs[0][1]
+        plt.subplot(2,2,2)
+
+        #print 'Model sum: ', model.sum()
+        im = plt.imshow(dataimg, 
+                           extent=extent, origin='upper', 
+                           aspect='auto', interpolation='nearest')
+        plt.xlabel('F110W - F160W')
+        plt.ylabel('Extinction Corrected F160W')
+        plt.title('Data')
+        #plt.colorbar(im)
+
+        #ax = axs[1][1]
+        plt.subplot(2,2,4)
+
+        resid = dataimg - model
+
+        minresid = nanmin(resid)
+        maxresid = nanmax(resid)
+        max = nanmax([abs(minresid), maxresid])
+        im = plt.imshow(resid, cmap='seismic', vmin=-max, vmax=max,
+                           extent=extent, origin='upper', 
+                           aspect='auto', interpolation='nearest')
+        plt.xlabel('F110W - F160W')
+        plt.ylabel('Extinction Corrected F160W')
+        plt.title('Residuals')
+        plt.colorbar(im)
+
+        #ax = axs[1][0]
+        plt.subplot(2,2,3)
+
+        unreddenedmodel = array(makefakecmd_AVparamsonly([0.01,0.01,0.1]))
+
+        im = plt.imshow(unreddenedmodel, 
+                           extent=extent, origin='upper', 
+                           aspect='auto', interpolation='nearest')
+        plt.xlabel('F110W - F160W')
+        plt.ylabel('Extinction Corrected F160W')
+        plt.title('Foreground')
+
+    else:
+
+        fig = plt.figure(3, figsize=(9,9))
+        plt.clf()
+
+        plt.imshow(model,  extent=extent, origin='upper', aspect='auto', 
+                     interpolation='nearest')
+        plt.xlabel('F110W - F160W')
+        plt.ylabel('Extinction Corrected F160W')
+        plt.title('Model')
+
+    plt.draw()
+
+
+def show_model_examples():
+
+    Avals = [0.25, 1, 2.5]
+    muvals = [0.1, 0.5, 1]
+    mufacs = [0.1, 0.25, 0.5]
+
+    fig = plt.figure(1, figsize=(9,9))
+
+    for i in range(len(Avals)):
+
+        for j in range(len(mufacs)):
+
+            AV = Avals[i]
+            mu = mufacs[j] * AV
+            params = [0.5, AV, mu]
+
+            model = array(makefakecmd_AVparamsonly(params))
+            extent = [color_boundary[0], color_boundary[-1],
+                      qmag_boundary[-1], qmag_boundary[0]]
+
+            #fig, (axs) = plt.subplots(ncols=len(Avals), nrows=len(muvals), 
+            #                          squeeze=False, figsize=(9,9))
+            #ax = axs[i][j]
+            print i, j, i*len(muvals) + j, AV, mu, mufacs[j]
+            ax = fig.add_subplot(len(Avals), len(mufacs), i*len(mufacs) + j + 1)
+
+            im = ax.imshow(model,  extent=extent, 
+                           origin='upper', aspect='auto', 
+                           interpolation='nearest')
+            #ax.set_xlabel('F110W - F160W')
+            #ax.set_ylabel('Extinction Corrected F160W')
+            ax.set_title('AV: %s  mu/AV: %s' % (AV,mufacs[j]))
+
+    plt.draw()
