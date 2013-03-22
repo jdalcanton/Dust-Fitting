@@ -686,6 +686,7 @@ def getPercentileLevels(h, frac=[0.5, 0.65, 0.95, 0.975]):
 	#cumulative values
 	cval = rval.cumsum()
 	#retrieve the largest indice up to the fraction of the sample we want
+	cval = (cval - cval[0]) / (cval[-1] - cval[0])
 	ind = numpy.where(cval <= cval[-1]*float(frac))[0].max()
 	res = rval[ind]
 	del val, cval, ind, rval
