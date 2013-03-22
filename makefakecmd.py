@@ -993,7 +993,7 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0):
                        interpolation='nearest')
         plt.xlabel('F110W - F160W')
         plt.ylabel('Extinction Corrected F160W')
-        #plt.title('Model')
+        plt.title('Model')
         #plt.colorbar(im)
 
         #plt.gca().autoscale(False)
@@ -1016,7 +1016,7 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0):
                            aspect='auto', interpolation='nearest')
         plt.xlabel('F110W - F160W')
         plt.ylabel('Extinction Corrected F160W')
-        #plt.title('Data')
+        plt.title('Data')
         #plt.colorbar(im)
 
         #ax = axs[1][1]
@@ -1032,7 +1032,7 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0):
                            aspect='auto', interpolation='nearest')
         plt.xlabel('F110W - F160W')
         plt.ylabel('Extinction Corrected F160W')
-        #plt.title('Residuals')
+        plt.title('Residuals')
         plt.colorbar(im)
 
         #ax = axs[1][0]
@@ -1045,7 +1045,7 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0):
                            aspect='auto', interpolation='nearest')
         plt.xlabel('F110W - F160W')
         plt.ylabel('Extinction Corrected F160W')
-        #plt.title('Foreground')
+        plt.title('Foreground')
 
     else:
 
