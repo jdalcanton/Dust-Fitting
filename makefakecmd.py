@@ -743,7 +743,10 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
                 bestfit_values[i_ra, i_dec, :] = bestfit
                 percentile_values[i_ra, i_dec, :] = sigma.flatten()
                 
-                plot_mc_results(d, bestfit, datamag=i_q, datacol=i_c)
+                try: 
+                    plot_mc_results(d, bestfit, datamag=i_q, datacol=i_c)
+                except:
+                    pass
             else:
                 dummy = array([-1, -1, -1])
                 bestfit_values[i_ra, i_dec, :] = [-1, -1, -1]
