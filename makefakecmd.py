@@ -425,8 +425,8 @@ def makefakecmd(fg_cmd, cvec, mvec, AVparam, c0, floorfrac=0.0,
     # set up reddening parameters
     
     fracred = AVparam[0]
+    #fracred = exp(AVparam[0]) / (1. + exp(AVparam[0])) # x = ln(f/(1-f))
     medianAV = AVparam[1]
-    #sigma = AVparam[2] * medianAV  
     stddev = AVparam[2] * medianAV
     sigma = log((1. + sqrt(1. + 4. * AVparam[2]**2)) / 2.)
     Amag_AV = AVparam[3]
@@ -558,7 +558,7 @@ def cmdlikelihoodfunc(param, i_star_color, i_star_magnitude):
     stars fall in before the call -- do the masking in advance as well)
     """
 
-    if (priors(param) == False):
+    if (ln_priors(param) == False):
         return -inf
 
     # calculate probability distribution
@@ -597,8 +597,9 @@ mfitrange = [18.7,21.3]   # range for doing selection for "narrow" RGB
 
 # Set up color range and binning for color and magnitude
 
-crange    = [0.3,3.0]
-deltapix_approx =  [0.05,0.2]
+#crange    = [0.3,3.0]
+crange    = [0.3,2.5]
+deltapix_approx =  [0.025,0.3]
 nbins = [int((m160range[1] - m160range[0]) / deltapix_approx[1]),
          int((crange[1] - crange[0]) / deltapix_approx[0])]
 
@@ -712,7 +713,7 @@ def get_ra_dec_bin(i_ra=60, i_dec=20):
 
 
 def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
-                       nwalkers=100, nsamp=10, nburn=200):
+                       nwalkers=100, nsamp=15, nburn=100):
 
     i_ra_dec_vals, ra_bins, dec_bins = split_ra_dec(ra, dec, 
                                                     d_arcsec = d_arcsec)
@@ -723,13 +724,18 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
     bestfit_values = zeros([nx, ny, nz_bestfit])
     percentile_values = zeros([nx, ny, nz_sigma])
 
-    #for i_ra in range(len(ra_bins)-1):
-    for i_ra in [39]:
+    #param_init = [0.0, 0.5, 0.2]
+    param_init = [0.5, 0.5, 0.2]
 
-        param_init = [0.5, 0.5, 0.1]
+    #for i_ra in range(len(ra_bins)-1):
+    #for i_ra in [36, 37, 38, 39]:
+    #for i_ra in [10, 11, 12, 13, 36, 37, 38, 39]:
+    for i_ra in [36, 37]:
 
         #for i_dec in range(len(dec_bins)-1):
-        for i_dec in [10, 12, 15, 17]:
+        #for i_dec in [15, 16, 17, 18, 19, 20]:
+        #for i_dec in [35, 36, 37, 38, 39, 15, 16, 17, 18, 19, 20]:
+        for i_dec in [19, 16]:
 
             i_c, i_q = get_star_indices(c[i_ra_dec_vals[i_ra, i_dec]], 
                                         q[i_ra_dec_vals[i_ra, i_dec]], 
@@ -738,8 +744,9 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
             if len(i_c) > nmin: 
                 samp, d, bestfit, sigma, acor = run_emcee(i_c, i_q,
                                                           param_init,
-                                                          nwalkers, nsamp, 
-                                                          burncut=nburn)
+                                                          nwalkers=nwalkers, 
+                                                          nsteps=nsamp, 
+                                                          nburn=nburn)
                 bestfit_values[i_ra, i_dec, :] = bestfit
                 percentile_values[i_ra, i_dec, :] = sigma.flatten()
                 
@@ -762,38 +769,65 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
     
 ############# CODE FOR RUNNING EMCEE AND PLOTTING RESULTS ###################
 
-def priors(p):
+def ln_priors(p):
     
-    p0 = [0.0, 1.0]          # fracred -- red fraction
-    p1 = [0.0001, 6.0]       # median A_V
-    p2 = [0.01, 2.0]        # sigma_A/A_V (lognormal width -- 
-                             # high sigma was alway sign of bad fit)
+    # set up ranges
 
-    good = ((p0[0] <= p[0]) & (p[0] <= p0[1]) & 
-            (p1[0] <= p[1]) & (p[1] <= p1[1]) & 
-            (p2[0] <= p[2]) & (p[2] <= p2[1]))
+    #p0 = [-4.0, 4.0]          # x = ln(f/(1-f)) where fracred -- red fraction
+    p0 = [0.05, 0.95]         # fracred -- red fraction
+    p1 = [0.0001, 6.0]        # median A_V
+    p2 = [0.01, 2.0]          # sigma_A/A_V (lognormal stddev / median)
+                              
+    # set up gaussians
+    #p0mean = 0.0              # symmetric in x means mean of f=0.5
+    #p0stddev = 1.0
+    p0mean = 0.5              # symmetric in x means mean of f=0.5
+    p0stddev = 0.15
+    p2mean = 0.4              # broad half gaussian
+    p2stddev = p2[1] - p2mean
 
-    return good
+    # return -Inf if the parameters are out of range
+    if ((p0[0] > p[0]) | (p[0] > p0[1]) | 
+        (p1[0] > p[1]) | (p[1] > p1[1]) | 
+        (p2[0] > p[2]) | (p[2] > p2[1])) :
+        return -Inf
 
+    # if all parameters are in range, return the ln of the Gaussian 
+    # (for a Gaussian prior)
+    lnp = 0.0000001
+    lnp += -0.5 * (p[0] - p0mean) ** 2 / p0stddev**2
+    lnp += -0.5 * (p[2] - p2mean) ** 2 / p2stddev**2
+    return lnp
+
+    
+def ln_prob(param, i_star_color, i_star_magnitude):
+
+    lnp = ln_priors(param)
+
+    if lnp == -Inf:
+        return -Inf
+
+    return lnp + cmdlikelihoodfunc(param, i_star_color, i_star_magnitude)
+    
 
 def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2], 
-              nwalkers=100, nsteps=10, burncut=100):
+              nwalkers=100, nsteps=10, nburn=100):
 
     import emcee
 
     # setup emcee
 
-    ndim = len(param)
+    assert(ln_priors(param)), "First Guess outside the priors"
 
-    assert(priors(param)), "First Guess outside the priors"
+    ndim = len(param)
 
     p0 = [param*(1. + random.normal(0, 0.01, ndim)) for i in xrange(nwalkers)]
     
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, cmdlikelihoodfunc, 
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, ln_prob, 
                                     args=[i_color,i_qmag])
     
     # burn in....
-    pos, prob, state = sampler.run_mcmc(p0, burncut)
+    pos, prob, state = sampler.run_mcmc(p0, nburn)
 
     # Correlation function values -- keep at least this many nsteps x 2
     acor = sampler.acor
@@ -802,7 +836,7 @@ def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2],
     sampler.reset()
     sampler.run_mcmc(pos, nsteps)
 
-    names = ['frac', 'A_V', 'w']
+    names = ['x', 'A_V', 'w']
     d = { k: sampler.flatchain[:,e] for e, k in enumerate(names) }
     d['lnp'] = sampler.lnprobability.flatten()
     idx = d['lnp'].argmax()
@@ -815,7 +849,7 @@ def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2],
 
 
 def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0, 
-                    keylist=['frac', 'A_V', 'w', 'lnp']):
+                    keylist=['x', 'A_V', 'w', 'lnp']):
 
     ##  morgan's plotting code, takes standard keywords
     #ezfig.plotCorr(d, d.keys())
@@ -945,6 +979,7 @@ def show_model_examples():
 
             AV = Avals[i]
             w = wfacs[j] * AV
+            params = [0.0, AV, w]
             params = [0.5, AV, w]
 
             model = array(makefakecmd_AVparamsonly(params))
