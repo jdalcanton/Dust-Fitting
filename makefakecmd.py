@@ -797,6 +797,7 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
               percentile_values=percentile_values,
               ra_bins = ra_bins,
               dec_bins = dec_bins)
+        plot_bestfit_results(results_file = filename, brickname=filename)
     except:
         pass
 
@@ -1016,54 +1017,199 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz', brickname=' 
     p  = dat['percentile_values']
     rabin = dat['ra_bins']
     decbin = dat['dec_bins']
-
+    print 'rabin:  ', len(rabin), '[', min(rabin), ',', max(rabin), ']'
+    print 'decbin: ', len(decbin), '[', min(decbin), ',', max(decbin), ']'
+    #rangevec = [min(decbin), max(decbin), min(rabin), max(rabin)]
+    rangevec = [max(decbin), min(decbin), max(rabin), min(rabin)]
+    dra = (max(rabin) - min(rabin)) * sin((min(decbin) + max(decbin))/2.0)
+    ddec = min(decbin) + max(decbin)
+    rat = dra / ddec
+    
     # Best fit results
 
-    fig = plt.figure(1, figsize=(13,6))
+    plt.figure(1)
+    plt.close()
+    fig = plt.figure(1, figsize=(17,7))
     plt.clf()
     plt.suptitle(brickname)
 
     plt.subplot(1,3,1)
-    im = plt.imshow(bf[:,:,1],vmin=0, vmax=4, interpolation='nearest')
+    A = bf[:,:,1]
+    #im = plt.imshow(bf[:,:,1],vmin=0, vmax=4, interpolation='nearest', 
+    im = plt.imshow(bf[:,::-1,1],vmin=0, vmax=4, interpolation='nearest', 
+                    extent=rangevec, origin='upper')
     plt.colorbar(im)
     plt.title('$A_V$')
     
     plt.subplot(1,3,2)
-    im = plt.imshow(bf[:,:,0],vmin=0, vmax=1, interpolation='nearest', 
+    im = plt.imshow(bf[:,::-1,0],vmin=0, vmax=1, interpolation='nearest', 
+                    extent=rangevec, origin='upper', 
                     cmap='seismic')
     plt.colorbar(im)
     plt.title('$f_{reddened}$')
     
     plt.subplot(1,3,3)
-    im = plt.imshow(bf[:,:,1]*bf[:,:,2],vmin=0, vmax=2, interpolation='nearest')
+    im = plt.imshow(bf[:,::-1,1]*bf[:,::-1,2],vmin=0, vmax=2, interpolation='nearest', 
+                    extent=rangevec, origin='upper')
     plt.colorbar(im)
     plt.title('$\sigma_{A_V}$')
         
-    # Best uncertainties results
+    # Uncertainty results
 
-    sigf = (p[:,:,2] - p[:,:,0]) / 2.0
-    sigA = (p[:,:,5] - p[:,:,3]) / 2.0
-    sigw = (p[:,:,8] - p[:,:,6]) / 2.0
+    sigf = (p[:,::-1,2] - p[:,::-1,0]) / 2.0
+    sigA = (p[:,::-1,5] - p[:,::-1,3]) / 2.0
+    sigw = (p[:,::-1,8] - p[:,::-1,6]) / 2.0
 
-    fig = plt.figure(2, figsize=(13,6))
+    plt.figure(2)
+    plt.close()
+
+    fig = plt.figure(2, figsize=(17,7))
     plt.clf()
     plt.suptitle(brickname)
 
     plt.subplot(1,3,1)
-    im = plt.imshow(sigA,vmin=0, vmax=1.0, interpolation='nearest')
+    im = plt.imshow(sigA/bf[:,::-1,1],vmin=0, vmax=1.5, interpolation='nearest', 
+                    extent=rangevec, origin='upper', 
+                    cmap='gist_ncar')
     plt.colorbar(im)
-    plt.title('$A_V$ Uncertainty')
+    plt.title('$\Delta A_V / A_V$')
     
     plt.subplot(1,3,2)
     im = plt.imshow(sigf,vmin=0, vmax=0.5, interpolation='nearest', 
-                    cmap='seismic')
+                    extent=rangevec, origin='upper', 
+                    cmap='gist_ncar')
     plt.colorbar(im)
-    plt.title('$f_{reddened}$ Uncertainty')
+    plt.title('$\Delta f_{reddened}$ ')
     
     plt.subplot(1,3,3)
-    im = plt.imshow(bf[:,:,1]*bf[:,:,2],vmin=0, vmax=3, interpolation='nearest')
+    im = plt.imshow(sigw / (bf[:,::-1,1]*bf[:,::-1,2]),vmin=0, vmax=4, interpolation='nearest', 
+                    extent=rangevec, origin='upper', 
+                    cmap='gist_ncar')
     plt.colorbar(im)
-    plt.title('$\sigma_{A_V}/A_V$ Uncertainty')
+    plt.title('$\Delta(\sigma_{A_V}/A_V) / (\sigma_{A_V}/A_V)$')
+
+    # Best fit value scatter plots
+
+    plt.figure(3)
+    plt.close()
+    fig = plt.figure(3, figsize=(10,7))
+    plt.clf()
+    plt.suptitle(brickname)
+
+    plt.subplot(2,2,1)
+    im = plt.scatter(bf[:,:,1],bf[:,:,0],c=(bf[:,:,2]*bf[:,:,1]),s=7,linewidth=0,
+                     alpha=0.4, vmin=0, vmax=2)
+    plt.colorbar(im)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$f_{red}$')
+    plt.axis([0, 4, 0, 1])
+    
+    plt.subplot(2,2,2)
+    im = plt.scatter(bf[:,:,1],bf[:,:,2]*bf[:,:,1],c=bf[:,:,0],s=7,linewidth=0,alpha=0.4,
+                     vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\sigma_{A_V}$')
+    plt.axis([0, 4, 0, 3])
+    
+    plt.subplot(2,2,3)
+    im = plt.scatter(bf[:,:,1],bf[:,:,2],c=bf[:,:,0],s=7,linewidth=0,alpha=0.4,
+                     vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\sigma_{A_V} / A_V$')
+    plt.axis([0, 4, 0, 3])
+    
+    plt.subplot(2,2,4)
+    im = plt.scatter(bf[:,:,0],bf[:,:,2],c=bf[:,:,1],s=7,linewidth=0,alpha=0.4,
+                     vmin=0, vmax=4)
+    plt.colorbar(im)
+    plt.xlabel('$f_{red}$')
+    plt.ylabel('$\sigma_{A_V} / A_V$')
+    plt.axis([0, 1, 0, 3])
+    
+    # Uncertainty scatter plots, vs self on x-axis
+
+    plt.figure(4)
+    plt.close()
+    fig = plt.figure(4, figsize=(10,7))
+    plt.clf()
+    plt.suptitle(brickname)
+
+    plt.subplot(2,2,1)
+    im = plt.scatter(bf[:,:,1], sigA / bf[:,:,1], c=bf[:,:,0],
+                     s=7, linewidth=0,
+                     alpha=0.4, vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\Delta A_V / A_V$')
+    plt.axis([0, 4, 0, 1.5])
+    
+    plt.subplot(2,2,2)
+    im = plt.scatter(bf[:,:,0], sigf, c=bf[:,:,1],
+                     s=7, linewidth=0, alpha=0.4,
+                     vmin=0, vmax=4)
+    plt.colorbar(im)
+    plt.xlabel('$f_{red}$')
+    plt.ylabel('$\Delta f_{red}$')
+    plt.axis([0, 1, 0, 0.5])
+    
+    plt.subplot(2,2,3)
+    im = plt.scatter(bf[:,:,2], sigw / (bf[:,:,2]*bf[:,:,1]), c=bf[:,:,1],
+                     s=7, linewidth=0, alpha=0.4,
+                     vmin=0, vmax=4)
+    plt.colorbar(im)
+    plt.xlabel('$\sigma_{A_V} / A_V$')
+    plt.ylabel('$\Delta(\sigma_{A_V}/A_V) / (\sigma_{A_V}/A_V)$')
+    plt.axis([0, 3, 0, 4])
+    
+    plt.subplot(2,2,4)
+    im = plt.scatter(bf[:,:,2],sigw / (bf[:,:,2]*bf[:,:,1]), c=bf[:,:,0],
+                     s=7, linewidth=0, alpha=0.4,
+                     vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.xlabel('$\sigma_{A_V} / A_V$')
+    plt.ylabel('$\Delta(\sigma_{A_V}/A_V) / (\sigma_{A_V}/A_V)$')
+    plt.axis([0, 3, 0, 4])
+    
+    # Uncertainty scatter plots, vs A_V on x-axis
+
+    plt.figure(5)
+    plt.close()
+    fig = plt.figure(5, figsize=(10,7))
+    plt.clf()
+    plt.suptitle(brickname)
+
+    plt.subplot(2,2,1)
+    im = plt.scatter(bf[:,:,1], sigA/bf[:,:,1], c=bf[:,:,0],
+                     s=7, linewidth=0, alpha=0.4, 
+                     vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\Delta A_V / A_V$')
+    plt.axis([0, 4, 0, 1.5])
+    
+    plt.subplot(2,2,2)
+    im = plt.scatter(bf[:,:,1], sigf, c=bf[:,:,0],
+                     s=7, linewidth=0, alpha=0.4,
+                     vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\Delta f_{red}$')
+    plt.axis([0, 4, 0, 0.5])
+    
+    plt.subplot(2,2,3)
+    im = plt.scatter(bf[:,:,1], sigw / (bf[:,:,2]*bf[:,:,1]), c=bf[:,:,0],
+                     s=7, linewidth=0, alpha=0.4,
+                     vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\Delta(\sigma_{A_V}/A_V) / (\sigma_{A_V}/A_V)$')
+    plt.axis([0, 4, 0, 4])
+    
+    # Force display
+
+    plt.draw()
 
 def show_model_examples():
 
