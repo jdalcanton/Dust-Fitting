@@ -1009,6 +1009,62 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0,
     plt.draw()
 
 
+def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz', brickname=' '):
+
+    dat = load(results_file)
+    bf = dat['bestfit_values']
+    p  = dat['percentile_values']
+    rabin = dat['ra_bins']
+    decbin = dat['dec_bins']
+
+    # Best fit results
+
+    fig = plt.figure(1, figsize=(13,6))
+    plt.clf()
+    plt.suptitle(brickname)
+
+    plt.subplot(1,3,1)
+    im = plt.imshow(bf[:,:,1],vmin=0, vmax=4, interpolation='nearest')
+    plt.colorbar(im)
+    plt.title('$A_V$')
+    
+    plt.subplot(1,3,2)
+    im = plt.imshow(bf[:,:,0],vmin=0, vmax=1, interpolation='nearest', 
+                    cmap='seismic')
+    plt.colorbar(im)
+    plt.title('$f_{reddened}$')
+    
+    plt.subplot(1,3,3)
+    im = plt.imshow(bf[:,:,1]*bf[:,:,2],vmin=0, vmax=2, interpolation='nearest')
+    plt.colorbar(im)
+    plt.title('$\sigma_{A_V}$')
+        
+    # Best uncertainties results
+
+    sigf = (p[:,:,2] - p[:,:,0]) / 2.0
+    sigA = (p[:,:,5] - p[:,:,3]) / 2.0
+    sigw = (p[:,:,8] - p[:,:,6]) / 2.0
+
+    fig = plt.figure(2, figsize=(13,6))
+    plt.clf()
+    plt.suptitle(brickname)
+
+    plt.subplot(1,3,1)
+    im = plt.imshow(sigA,vmin=0, vmax=1.0, interpolation='nearest')
+    plt.colorbar(im)
+    plt.title('$A_V$ Uncertainty')
+    
+    plt.subplot(1,3,2)
+    im = plt.imshow(sigf,vmin=0, vmax=0.5, interpolation='nearest', 
+                    cmap='seismic')
+    plt.colorbar(im)
+    plt.title('$f_{reddened}$ Uncertainty')
+    
+    plt.subplot(1,3,3)
+    im = plt.imshow(bf[:,:,1]*bf[:,:,2],vmin=0, vmax=3, interpolation='nearest')
+    plt.colorbar(im)
+    plt.title('$\sigma_{A_V}/A_V$ Uncertainty')
+
 def show_model_examples():
 
     Avals = [0.25, 1, 2.5]
