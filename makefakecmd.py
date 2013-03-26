@@ -1,6 +1,7 @@
 import pyfits
 from numpy import *
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 import pylab
 import PIL
 import time
@@ -1010,7 +1011,8 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0,
     plt.draw()
 
 
-def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz', brickname=' '):
+def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz', 
+                         brickname=' ', pngroot=''):
 
     dat = load(results_file)
     bf = dat['bestfit_values']
@@ -1029,9 +1031,10 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz', brickname=' 
 
     plt.figure(1)
     plt.close()
-    fig = plt.figure(1, figsize=(17,7))
+    fig1 = plt.figure(1, figsize=(14,7))
     plt.clf()
     plt.suptitle(brickname)
+    plt.subplots_adjust(left=0.02, right=0.98)
 
     plt.subplot(1,3,1)
     A = bf[:,:,1]
@@ -1053,6 +1056,9 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz', brickname=' 
                     extent=rangevec, origin='upper')
     plt.colorbar(im)
     plt.title('$\sigma_{A_V}$')
+
+    if (pngroot != ''):
+        plt.savefig(pngroot + '.1.png', bbox_inches=0)
         
     # Uncertainty results
 
@@ -1063,9 +1069,10 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz', brickname=' 
     plt.figure(2)
     plt.close()
 
-    fig = plt.figure(2, figsize=(17,7))
+    fig2 = plt.figure(2, figsize=(14,7))
     plt.clf()
     plt.suptitle(brickname)
+    plt.subplots_adjust(left=0.02, right=0.98)
 
     plt.subplot(1,3,1)
     im = plt.imshow(sigA/bf[:,::-1,1],vmin=0, vmax=1.5, interpolation='nearest', 
@@ -1088,11 +1095,14 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz', brickname=' 
     plt.colorbar(im)
     plt.title('$\Delta(\sigma_{A_V}/A_V) / (\sigma_{A_V}/A_V)$')
 
+    if (pngroot != ''):
+        plt.savefig(pngroot + '.2.png', bbox_inches=0)
+        
     # Best fit value scatter plots
 
     plt.figure(3)
     plt.close()
-    fig = plt.figure(3, figsize=(10,7))
+    fig3 = plt.figure(3, figsize=(10,7))
     plt.clf()
     plt.suptitle(brickname)
 
@@ -1128,11 +1138,14 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz', brickname=' 
     plt.ylabel('$\sigma_{A_V} / A_V$')
     plt.axis([0, 1, 0, 3])
     
+    if (pngroot != ''):
+        plt.savefig(pngroot + '.3.png', bbox_inches=0)
+        
     # Uncertainty scatter plots, vs self on x-axis
 
     plt.figure(4)
     plt.close()
-    fig = plt.figure(4, figsize=(10,7))
+    fig4 = plt.figure(4, figsize=(10,7))
     plt.clf()
     plt.suptitle(brickname)
 
@@ -1172,11 +1185,14 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz', brickname=' 
     plt.ylabel('$\Delta(\sigma_{A_V}/A_V) / (\sigma_{A_V}/A_V)$')
     plt.axis([0, 3, 0, 4])
     
+    if (pngroot != ''):
+        plt.savefig(pngroot + '.4.png', bbox_inches=0)
+        
     # Uncertainty scatter plots, vs A_V on x-axis
 
     plt.figure(5)
     plt.close()
-    fig = plt.figure(5, figsize=(10,7))
+    fig5 = plt.figure(5, figsize=(10,7))
     plt.clf()
     plt.suptitle(brickname)
 
@@ -1206,10 +1222,22 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz', brickname=' 
     plt.xlabel('$A_V$')
     plt.ylabel('$\Delta(\sigma_{A_V}/A_V) / (\sigma_{A_V}/A_V)$')
     plt.axis([0, 4, 0, 4])
-    
+
+    if (pngroot != ''):
+        plt.savefig(pngroot + '.5.png', bbox_inches=0)
+        
     # Force display
 
     plt.draw()
+
+    # Write files to PDF (tried writing multiple to PDF, but too big!)
+    #pp = PdfPages('../Results/test.pdf')
+    #pp.savefig(fig1)
+    #pp.savefig(fig2)
+    #pp.savefig(fig3)
+    #pp.savefig(fig4)
+    #pp.savefig(fig5)
+    #pp.close()
 
 def show_model_examples():
 
