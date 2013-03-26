@@ -428,7 +428,8 @@ def makefakecmd(fg_cmd, cvec, mvec, AVparam, c0, floorfrac=0.0,
     #fracred = exp(AVparam[0]) / (1. + exp(AVparam[0])) # x = ln(f/(1-f))
     medianAV = AVparam[1]
     stddev = AVparam[2] * medianAV
-    sigma = log((1. + sqrt(1. + 4. * AVparam[2]**2)) / 2.)
+    #stddev = AVparam[2]
+    sigma = log((1. + sqrt(1. + 4. * (stddev/medianAV)**2)) / 2.)
     Amag_AV = AVparam[3]
     Acol_AV = AVparam[4]
     
@@ -579,19 +580,43 @@ def cmdlikelihoodfunc(param, i_star_color, i_star_magnitude):
 
 datadir = '/astro/store/angst4/dstn/v8/'  # bagel
 datadir = '/mnt/angst4/dstn/v8/'          # chex
-datadir = '../../Data/'    # poptart
+datadir = '../../Data/'                   # poptart
+
+resultsdir = '../Results/'
 
 # Set up input data file and appropriate magnitude cuts 
 
-fn = datadir + 'ir-sf-b21-v8-st.fits'
+fnroot = 'ir-sf-b21-v8-st'
 m110range = [16.0,25.0]
 m160range = [18.4,23.25] # just above RC -- worse constraints on AV
 m160range = [18.4,24.5]  # just below RC
 m160range = [18.4,24.0]  # middle of RC
 
-fn = datadir + 'ir-sf-b17-v8-st.fits'
+fnroot = 'ir-sf-b17-v8-st'
 m110range = [16.0,24.0]
 m160range = [18.4,24.0]
+
+fnroot = 'ir-sf-b12-v8-st'
+m110range = [16.0,24.0]
+m160range = [18.4,24.0]
+
+fnroot = 'ir-sf-b14-v8-st'
+m110range = [16.0,23.5]
+m160range = [18.4,24.0]
+
+fnroot = 'ir-sf-b16-v8-st'
+m110range = [16.0,23.5]
+m160range = [18.4,24.0]
+
+fnroot = 'ir-sf-b18-v8-st'
+m110range = [16.0,24.0]
+m160range = [18.4,24.0]
+
+fnroot = 'ir-sf-b19-v8-st'
+m110range = [16.0,24.0]
+m160range = [18.4,24.0]
+
+fn = datadir + fnroot + '.fits'
 
 mfitrange = [18.7,21.3]   # range for doing selection for "narrow" RGB
 
@@ -713,7 +738,8 @@ def get_ra_dec_bin(i_ra=60, i_dec=20):
 
 
 def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
-                       nwalkers=100, nsamp=15, nburn=100):
+                       nwalkers=100, nsamp=15, nburn=100,
+                       filename=resultsdir + fnroot+'.npz'):
 
     i_ra_dec_vals, ra_bins, dec_bins = split_ra_dec(ra, dec, 
                                                     d_arcsec = d_arcsec)
@@ -727,15 +753,15 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
     #param_init = [0.0, 0.5, 0.2]
     param_init = [0.5, 0.5, 0.2]
 
-    #for i_ra in range(len(ra_bins)-1):
+    for i_ra in range(len(ra_bins)-1):
     #for i_ra in [36, 37, 38, 39]:
     #for i_ra in [10, 11, 12, 13, 36, 37, 38, 39]:
-    for i_ra in [36, 37]:
+    #for i_ra in [18]:
 
-        #for i_dec in range(len(dec_bins)-1):
+        for i_dec in range(len(dec_bins)-1):
         #for i_dec in [15, 16, 17, 18, 19, 20]:
         #for i_dec in [35, 36, 37, 38, 39, 15, 16, 17, 18, 19, 20]:
-        for i_dec in [19, 16]:
+        #for i_dec in [42,43,45]:
 
             i_c, i_q = get_star_indices(c[i_ra_dec_vals[i_ra, i_dec]], 
                                         q[i_ra_dec_vals[i_ra, i_dec]], 
@@ -757,12 +783,22 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
             else:
                 dummy = array([-1, -1, -1])
                 bestfit_values[i_ra, i_dec, :] = [-1, -1, -1]
-                percentile_values[i_ra, i_dec, :] = [[-1, -1, -1],
-                                                  [-1, -1, -1],
-                                                  [-1, -1, -1]]
+                percentile_values[i_ra, i_dec, :] = [-1, -1, -1,
+                                                      -1, -1, -1,
+                                                      -1, -1, -1]
                 acor = -1
                 
             print i_ra, i_dec, bestfit_values[i_ra, i_dec], acor
+
+    try: 
+        print 'Saving results to ',filename
+        savez(filename, 
+              bestfit_values=bestfit_values, 
+              percentile_values=percentile_values,
+              ra_bins = ra_bins,
+              dec_bins = dec_bins)
+    except:
+        pass
 
     return bestfit_values, percentile_values
 
@@ -776,15 +812,22 @@ def ln_priors(p):
     #p0 = [-4.0, 4.0]          # x = ln(f/(1-f)) where fracred -- red fraction
     p0 = [0.05, 0.95]         # fracred -- red fraction
     p1 = [0.0001, 6.0]        # median A_V
-    p2 = [0.01, 2.0]          # sigma_A/A_V (lognormal stddev / median)
+    p2 = [0.01, 3.0]          # sigma_A/A_V (lognormal stddev / median)
                               
     # set up gaussians
     #p0mean = 0.0              # symmetric in x means mean of f=0.5
     #p0stddev = 1.0
-    p0mean = 0.5              # symmetric in x means mean of f=0.5
-    p0stddev = 0.15
-    p2mean = 0.4              # broad half gaussian
+    p0mean = 0.5              # f=0.5 when not much other information
+    p0stddev = 0.25
+
+    AV_pix = deltapix_approx[0] / Acol_AV
+    #p1mean = 0.5 * AV_pix     # drive to low A_V if not much information
+    #p1stddev = 8.0            #  ...but, keep it wide so little influence
+
+    p2mean = 1.0              # w = broad gaussian 
     p2stddev = p2[1] - p2mean
+    #p2mean = AV_pix              # sigma_A
+    #p2stddev = p2[1] - p2mean
 
     # return -Inf if the parameters are out of range
     if ((p0[0] > p[0]) | (p[0] > p0[1]) | 
@@ -796,6 +839,7 @@ def ln_priors(p):
     # (for a Gaussian prior)
     lnp = 0.0000001
     lnp += -0.5 * (p[0] - p0mean) ** 2 / p0stddev**2
+    #lnp += -0.5 * (p[1] - p1mean) ** 2 / p1stddev**2
     lnp += -0.5 * (p[2] - p2mean) ** 2 / p2stddev**2
     return lnp
 
