@@ -750,7 +750,7 @@ def get_ra_dec_bin(i_ra=60, i_dec=20):
 
 def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
                        ra_bin_num='', dec_bin_num='',
-                       nwalkers=100, nsamp=15, nburn=100,
+                       nwalkers=50, nsamp=15, nburn=150,
                        filename=resultsdir + fnroot+'.npz'):
 
     i_ra_dec_vals, ra_bins, dec_bins = split_ra_dec(ra, dec, 
@@ -803,8 +803,8 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
                 # change x=ln(f/(1-f)) to f in bestfit and percentile
                 x = bestfit_values[i_ra, i_dec, 0]
                 bestfit_values[i_ra, i_dec, 0] = exp(x) / (1.0 + exp(x))
-                x = percentile_values[i_ra, i_dec, 0:2]
-                percentile_values[i_ra, i_dec, 0:2] = exp(x) / (1.0 + exp(x))
+                x = percentile_values[i_ra, i_dec, 0:3]
+                percentile_values[i_ra, i_dec, 0:3] = exp(x) / (1.0 + exp(x))
                 
                 try: 
                     plot_mc_results(d, bestfit, datamag=i_q, datacol=i_c)
@@ -940,7 +940,8 @@ def ln_prob(param, i_star_color, i_star_magnitude):
     
 
 def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2], 
-              nwalkers=100, nsteps=10, nburn=100):
+              nwalkers=50, nsteps=10, nburn=150, nthreads=0, pool=None):
+    # NOTE: nthreads not actually enabled!  Keep nthreads=0!
 
     import emcee
 
@@ -953,7 +954,7 @@ def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2],
     p0 = [param*(1. + random.normal(0, 0.01, ndim)) for i in xrange(nwalkers)]
     
     sampler = emcee.EnsembleSampler(nwalkers, ndim, ln_prob, 
-                                    args=[i_color,i_qmag])
+                                    args=[i_color,i_qmag], threads=nthreads, pool=pool)
     
     # burn in....
     pos, prob, state = sampler.run_mcmc(p0, nburn)
@@ -986,7 +987,7 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0,
 
     # Plot density of points in parameter banana diagrams
 
-    plt.figure(1)
+    plt.figure(1, figsize=(6,6))
     plt.clf()
     ezfig.plotCorr(d, keylist, plotfunc=ezfig.plotDensity, bins=50)
     plt.draw()
@@ -994,7 +995,7 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0,
 
     # Plot histograms of posterior distributions 
 
-    plt.figure(2)
+    plt.figure(2, figsize=(6,6))
     plt.clf()
     #for e, (k, v) in enumerate(d.items()):
     for e, k in enumerate(keylist):
