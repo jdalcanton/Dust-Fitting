@@ -8,7 +8,9 @@ import time
 import ezfig  # morgan's plotting code
 import read_brick_data as rbd
 from scipy import ndimage
-
+import string
+import os.path as op
+import random as rnd
 
 # Principle: "rotate" to frame where all "colors" are along reddening
 # vector. Rotate the -data- into this frame, once. Rotate the original
@@ -42,12 +44,16 @@ def split_ra_dec(ra, dec, d_arcsec=10.0):
     dec_max = nanmax(dec)
 
     # find center
-    ra_cen = (ra_max - ra_min) / 2.0
-    dec_cen = (dec_max - dec_min) / 2.0
+    ra_cen = (ra_max + ra_min) / 2.0
+    dec_cen = (dec_max + dec_min) / 2.0
+    print 'ra_cen:  ', ra_cen
+    print 'dec_cen: ', dec_cen
 
     # figure out number of bins, rounding up to nearest integer
     d_ra  = (d_arcsec / cos(math.pi * dec_cen / 180.0)) / 3600.0
     d_dec =  d_arcsec / 3600.0
+    print 'd_ra:  ',d_ra
+    print 'd_dec: ',d_dec
     n_ra  = int((ra_max - ra_min)   / d_ra  + 1.0)
     n_dec = int((dec_max - dec_min) / d_dec + 1.0)
 
@@ -66,8 +72,8 @@ def split_ra_dec(ra, dec, d_arcsec=10.0):
     # an integer multiple of d_arcsec
     ra_max  = ra_bins.max()
     dec_max = dec_bins.max()
-    ra_cen = (ra_max - ra_min) / 2.0
-    dec_cen = (dec_max - dec_min) / 2.0
+    ra_cen = (ra_max + ra_min) / 2.0
+    dec_cen = (dec_max + dec_min) / 2.0
 
     # get indices falling into each pixel in ra, dec bins
 
@@ -425,8 +431,8 @@ def makefakecmd(fg_cmd, cvec, mvec, AVparam, c0, floorfrac=0.0,
     
     # set up reddening parameters
     
-    fracred = AVparam[0]
-    #fracred = exp(AVparam[0]) / (1. + exp(AVparam[0])) # x = ln(f/(1-f))
+    #fracred = AVparam[0]
+    fracred = exp(AVparam[0]) / (1. + exp(AVparam[0])) # x = ln(f/(1-f))
     medianAV = AVparam[1]
     stddev = AVparam[2] * medianAV
     #stddev = AVparam[2]
@@ -597,10 +603,6 @@ fnroot = 'ir-sf-b17-v8-st'
 m110range = [16.0,24.0]
 m160range = [18.4,24.0]
 
-fnroot = 'ir-sf-b12-v8-st'
-m110range = [16.0,24.0]
-m160range = [18.4,24.0]
-
 fnroot = 'ir-sf-b14-v8-st'
 m110range = [16.0,23.5]
 m160range = [18.4,24.0]
@@ -616,6 +618,14 @@ m160range = [18.4,24.0]
 fnroot = 'ir-sf-b19-v8-st'
 m110range = [16.0,24.0]
 m160range = [18.4,24.0]
+
+fnroot = 'ir-sf-b22-v8-st'
+m110range = [16.0,24.5]
+m160range = [18.4,24.0]
+
+fnroot = 'ir-sf-b12-v8-st'
+m110range = [16.0,23.5]
+m160range = [18.4,23.25]
 
 fn = datadir + fnroot + '.fits'
 
@@ -738,7 +748,8 @@ def get_ra_dec_bin(i_ra=60, i_dec=20):
     return i_ctest, i_qtest
 
 
-def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
+def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
+                       ra_bin_num='', dec_bin_num='',
                        nwalkers=100, nsamp=15, nburn=100,
                        filename=resultsdir + fnroot+'.npz'):
 
@@ -748,18 +759,26 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
     nx, ny = i_ra_dec_vals.shape
     nz_bestfit = 3
     nz_sigma = nz_bestfit * 3
+    nz_quality = 2
     bestfit_values = zeros([nx, ny, nz_bestfit])
     percentile_values = zeros([nx, ny, nz_sigma])
+    quality_values = zeros([nx, ny, nz_quality])
 
-    #param_init = [0.0, 0.5, 0.2]
-    param_init = [0.5, 0.5, 0.2]
+    param_init = [-0.05, 0.5, 0.2]  # starting at x=0 locks in, because random*0 = 0
+    #param_init = [0.5, 0.5, 0.2]   # use for f fitting
 
-    for i_ra in range(len(ra_bins)-1):
+    if ra_bin_num == '':
+        ra_bin_num = range(len(ra_bins)-1)
+
+    if dec_bin_num == '':
+        dec_bin_num = range(len(dec_bins)-1)
+
+    for i_ra in ra_bin_num:
     #for i_ra in [36, 37, 38, 39]:
     #for i_ra in [10, 11, 12, 13, 36, 37, 38, 39]:
     #for i_ra in [18]:
 
-        for i_dec in range(len(dec_bins)-1):
+        for i_dec in dec_bin_num:
         #for i_dec in [15, 16, 17, 18, 19, 20]:
         #for i_dec in [35, 36, 37, 38, 39, 15, 16, 17, 18, 19, 20]:
         #for i_dec in [42,43,45]:
@@ -768,7 +787,9 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
                                         q[i_ra_dec_vals[i_ra, i_dec]], 
                                         color_boundary, qmag_boundary)
 
-            if len(i_c) > nmin: 
+            nstar = len(i_c)
+
+            if nstar > nmin: 
                 samp, d, bestfit, sigma, acor = run_emcee(i_c, i_q,
                                                           param_init,
                                                           nwalkers=nwalkers, 
@@ -776,51 +797,113 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 30.0,
                                                           nburn=nburn)
                 bestfit_values[i_ra, i_dec, :] = bestfit
                 percentile_values[i_ra, i_dec, :] = sigma.flatten()
+                idx = d['lnp'].argmax()
+                quality_values[i_ra, i_dec, :] = [d['lnp'][idx], nstar]
+
+                # change x=ln(f/(1-f)) to f in bestfit and percentile
+                x = bestfit_values[i_ra, i_dec, 0]
+                bestfit_values[i_ra, i_dec, 0] = exp(x) / (1.0 + exp(x))
+                x = percentile_values[i_ra, i_dec, 0:2]
+                percentile_values[i_ra, i_dec, 0:2] = exp(x) / (1.0 + exp(x))
                 
                 try: 
                     plot_mc_results(d, bestfit, datamag=i_q, datacol=i_c)
                 except:
                     pass
             else:
-                dummy = array([-1, -1, -1])
-                bestfit_values[i_ra, i_dec, :] = [-1, -1, -1]
-                percentile_values[i_ra, i_dec, :] = [-1, -1, -1,
-                                                      -1, -1, -1,
-                                                      -1, -1, -1]
-                acor = -1
+                dummy = array([-666, -666, -666])
+                bestfit_values[i_ra, i_dec, :] = [-666, -666, -666]
+                percentile_values[i_ra, i_dec, :] = [-666, -666, -666,
+                                                      -666, -666, -666,
+                                                      -666, -666, -666]
+                quality_values[i_ra, i_dec, :] = [-666, nstar]
+                acor = -666
                 
-            print i_ra, i_dec, bestfit_values[i_ra, i_dec], acor
+            print i_ra, i_dec, bestfit_values[i_ra, i_dec], acor, quality_values[i_ra, i_dec]
+
+    # check if file exists, to avoid overwrites
+    if op.isfile(filename):
+        # if it does, append some random characters
+        print 'Output file ', filename, ' exists. Changing filename...'
+        filenameorig = filename
+        filename = op.splitext(filenameorig)[0] + '.' + id_generator(4) + '.npz'
+        print 'New name: ', filename
 
     try: 
         print 'Saving results to ',filename
         savez(filename, 
               bestfit_values=bestfit_values, 
               percentile_values=percentile_values,
+              quality_values=quality_values,
               ra_bins = ra_bins,
               dec_bins = dec_bins)
+    except:
+        print 'Failed to save file', filename
+
+    try:
         plot_bestfit_results(results_file = filename, brickname=filename)
     except:
-        pass
+        print 'Failed to plot results'
+
 
     return bestfit_values, percentile_values
 
-    
+def test_resolution(ra, dec, resval=[15, 10, 7.5, 5], brickfrac=0.25):
+
+    rarange = array([min(ra), max(ra)])
+    decrange = array([min(dec), max(dec)])
+    deccen = average(decrange)
+    print 'RA Range:  ', rarange
+    print 'Dec Range: ', decrange
+    print 'Dec Cen:   ', deccen
+
+    for res in resval: 
+
+        outfile = resultsdir + fnroot + '.' + str(res) + '.npz'
+
+        # get range of ra indices to use
+        
+        d_ra  = (float(res) / cos(math.pi * deccen / 180.0)) / 3600.0
+        d_dec =  float(res) / 3600.0
+        print 'dRA:   ', d_ra
+        print 'dDec:  ', d_dec
+        ntotra  = (1.0 + (rarange[1] - rarange[0]) / d_ra)
+        ntotdec = (1.0 + (decrange[1] - decrange[0]) / d_dec)
+        nra = int(round(brickfrac * ntotra))
+        ira = arange(nra) 
+        print 'Analyzing resolution = ', res, ' in ', nra, ' rows from ', ntotra,', ', ntotdec
+
+        #i_ra_dec_vals, ra_bins, dec_bins = split_ra_dec(ra, dec, 
+        #                                            d_arcsec = res)
+        print 'Saving to ', outfile
+        b, s = fit_ra_dec_regions(ra, dec, d_arcsec=res, ra_bin_num = ira, filename=outfile)
+
+    return 
+
+def id_generator(size=4, chars=string.ascii_uppercase + string.digits):
+    """
+    return string of random characters: 
+    http://stackoverflow.com/questions/2257441/python-random-string-generation-with-upper-case-letters-and-digits
+    """
+
+    return ''.join(rnd.choice(chars) for x in range(size))    
+
 ############# CODE FOR RUNNING EMCEE AND PLOTTING RESULTS ###################
 
 def ln_priors(p):
     
     # set up ranges
 
-    #p0 = [-4.0, 4.0]          # x = ln(f/(1-f)) where fracred -- red fraction
-    p0 = [0.05, 0.95]         # fracred -- red fraction
-    p1 = [0.0001, 6.0]        # median A_V
-    p2 = [0.01, 3.0]          # sigma_A/A_V (lognormal stddev / median)
+    p0 = [-2.5, 2.5]           # x = ln(f/(1-f)) where fracred -- red fraction
+    #p0 = [0.05, 0.95]         # fracred -- red fraction
+    p1 = [0.0001, 6.0]         # median A_V
+    p2 = [0.01, 3.0]           # sigma_A/A_V (lognormal stddev / median)
                               
     # set up gaussians
-    #p0mean = 0.0              # symmetric in x means mean of f=0.5
-    #p0stddev = 1.0
-    p0mean = 0.5              # f=0.5 when not much other information
-    p0stddev = 0.25
+    p0mean = 0.0              # symmetric in x means mean of f=0.5
+    p0stddev = 1.0
+    #p0mean = 0.5              # f=0.5 when not much other information
+    #p0stddev = 0.25
 
     AV_pix = deltapix_approx[0] / Acol_AV
     #p1mean = 0.5 * AV_pix     # drive to low A_V if not much information
