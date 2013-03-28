@@ -751,7 +751,8 @@ def get_ra_dec_bin(i_ra=60, i_dec=20):
 def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
                        ra_bin_num='', dec_bin_num='',
                        nwalkers=50, nsamp=15, nburn=150,
-                       filename=resultsdir + fnroot+'.npz'):
+                       filename=resultsdir + fnroot+'.npz',
+                       showplot='bad'):
 
     i_ra_dec_vals, ra_bins, dec_bins = split_ra_dec(ra, dec, 
                                                     d_arcsec = d_arcsec)
@@ -796,7 +797,8 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
                                                           nsteps=nsamp, 
                                                           nburn=nburn)
                 bestfit_values[i_ra, i_dec, :] = bestfit
-                percentile_values[i_ra, i_dec, :] = sigma.flatten()
+                sigmavec = sigma.flatten()
+                percentile_values[i_ra, i_dec, :] = sigmavec
                 idx = d['lnp'].argmax()
                 quality_values[i_ra, i_dec, :] = [d['lnp'][idx], nstar]
 
@@ -806,10 +808,26 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
                 x = percentile_values[i_ra, i_dec, 0:3]
                 percentile_values[i_ra, i_dec, 0:3] = exp(x) / (1.0 + exp(x))
                 
-                try: 
-                    plot_mc_results(d, bestfit, datamag=i_q, datacol=i_c)
-                except:
-                    pass
+                # if requested, plot results
+
+                if showplot == 'all':  # plot every entry
+                    try: 
+                        plot_mc_results(d, bestfit, datamag=i_q, datacol=i_c)
+                    except:
+                        pass
+
+                if showplot == 'bad':  # plot only questionable fits
+
+                    if ((bestfit[0] < 0.15) | (bestfit[1] > 2) |
+                        (bestfit[0] < sigmavec[0]) | (sigmavec[2] < bestfit[0]) |
+                        (bestfit[1] < sigmavec[3]) | (sigmavec[5] < bestfit[1]) |
+                        (bestfit[2] < sigmavec[6]) | (sigmavec[8] < bestfit[2])):
+                        try: 
+                            plot_mc_results(d, bestfit, datamag=i_q, datacol=i_c)
+                        except:
+                            pass
+
+                
             else:
                 dummy = array([-666, -666, -666])
                 bestfit_values[i_ra, i_dec, :] = [-666, -666, -666]
