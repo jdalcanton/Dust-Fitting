@@ -539,7 +539,7 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
     nrlo = istar[irgb[nrgblo]]
     nrhi = istar[irgb[nrgbhi]]
 
-    nrhi = np.where(nrhi < len(istar)-1, nrhi, len(istar)-1)
+    nrhi = np.where(nrhi < len(istar)-1, nrhi, len(istar)-1)     # tidy up ends again
     nrbins = len(nrhi)
 
     print 'nrgblo: ', nrgblo
@@ -548,6 +548,29 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
     print 'nrhi: ', nrhi
 
     print 'Splitting into ', len(nrhi),' radial bins with ',nrgbstars,' in each upper RGB.'
+
+    # merge adjacent bins, if they're too close together....
+
+    min_dr = 0.01
+    nr_orig = len(nrlo)
+    meanr = np.array([np.average(r[nrlo[i]:nrhi[i]]) for i in range(len(nrlo))])
+    dmeanr = np.array([meanr[i+1] - meanr[i] for i in range(len(nrlo)-1)])
+    bad_dr = np.where(dmeanr < min_dr)[0]
+
+    while (len(bad_dr) > 0): # are there any gaps that are too small?
+
+        if (bad_dr[0] + 1 < len(nrlo) - 1):     # and is the gap not in the last, unmergeable bin?
+
+            # if so, merge the first instance with the adjacent cell
+            print 'Merging ', bad_dr[0], ' with ', bad_dr[0] + 1, '.  ', len(bad_dr)-1, ' small gaps remaining.'
+            nrlo = np.delete(nrlo, bad_dr[0] + 1)   
+            nrhi = np.delete(nrhi, bad_dr[0])
+
+            meanr = np.array([np.average(r[nrlo[i]:nrhi[i]]) for i in range(len(nrlo))])
+            dmeanr = np.array([meanr[i+1] - meanr[i] for i in range(len(nrlo)-1)])
+            bad_dr = np.where(dmeanr < min_dr)[0]
+
+    print 'Reduced number of radial bins from ', nr_orig, ' to ', len(nrlo)
 
     # run once to get shape of CMD
     cmd, fgmask, meancol, sigcol, cboundary, mboundary, extent = make_low_AV_cmd(c, m, 
@@ -721,6 +744,7 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
                                                          size=noise_smooth)
 
             # calculate fraction in noise model
+            color_mag_datamask = mask_array[:,:,i]
             nfg = (cmd_n * color_mag_datamask).sum()
             nnoise = (noise_model * color_mag_datamask).sum()
             frac_noise = nnoise / nfg
@@ -732,7 +756,8 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
             noise_array[:,:,i] = noise_model
             noisefrac_array[i] = frac_noise
 
-            plt.imshow(noise_model,  extent=extent, aspect='auto', interpolation='nearest')
+            plt.imshow(0.005*color_mag_datamask + noise_model,  extent=extent, aspect='auto', 
+                       interpolation='nearest', vmin=0, vmax=0.1)
             plt.xlabel('F110W - F160W')
             plt.ylabel('F160W')
             plt.title('Major Axis: '+ ("%g" % np.round(meanr_array[i],3)) + 
