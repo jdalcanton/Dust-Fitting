@@ -5,11 +5,13 @@ import makefakecmd as mfcmd
 import os.path as op
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
+from scipy import ndimage
 
 def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
-                             frac=0.05, mrange=[19,21.5],
-                             rgbparam=[22.0, 0.72, -0.13, -0.012], nrbins = 5., 
-                             d_arcsec=10, savefile = True, savefiledir = '../Unreddened/'):
+                   frac=0.05, mrange=[19,21.5],
+                   rgbparam=[22.0, 0.72, -0.13, -0.012], nrbins = 5., 
+                   d_arcsec=10, 
+                   savefile = True, savefiledir = '../Unreddened/', savefilename=''):
     """
     Return a list of color and magnitude for stars in the frac of low
     extinction pixels defined by narrowness of RGB.
@@ -68,6 +70,7 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
     
     # find elements with the narrowest color sequence, for each interval in rvec
 
+    mincstd = 0.01   # guarantee a minimum threshold, if cstd = 0 for underpopulated pixels
     cstdthreshvec = 0.0 * np.arange(len(rvec) - 1)
     for j in range(len(rvec)-1):
         cstdtmp = [x for i, x in enumerate(cstdlist) if ((rvec[j] <= rgood[i]) & (rgood[i] < rvec[j+1]))]
@@ -75,6 +78,8 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
         n_cstd_thresh = int(frac * (len(cstdtmp) + 1.))
         if (len(cstdtmp) > 0) & (n_cstd_thresh <= len(cstdtmp)-1):
             cstdthreshvec[j] = cstdtmp[n_cstd_thresh]
+            if (cstdthreshvec[j] < mincstd):
+                cstdthreshvec[j] = mincstd
         else:
             cstdthreshvec[j] = -1
 
@@ -112,13 +117,15 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
 
     if savefile:
         
-        savefilename = savefiledir + op.splitext(filename)[0] + '.npz'
+        if savefilename == '':
+            savefilename = op.splitext(filename)[0] + '.npz'
         if op.isfile(savefilename):
             # if it does, append some random characters
             print 'Output file ', savefilename, ' exists. Changing filename...'
             savefilenameorig = savefilename
-            savefilename = op.splitext(savefilenameorig)[0] + '.' + mfcmd.id_generator(4) + '.npz'
+            savefilename = savefiledir + op.splitext(savefilenameorig)[0] + '.' + mfcmd.id_generator(4) + '.npz'
             #print 'New name: ', savefilename
+        savefilename = savefiledir + savefilename
 
         print 'Writing data to ', savefilename
         np.savez(savefilename,
@@ -212,10 +219,12 @@ def make_all_isolate_AV():
 
     for filename in filelist:
 
-        c, m, i, ra, dec, r, cstd, cm = isolate_low_AV(filename = filename, frac=f, mrange=mr, nrbins=nb, 
+        savefilename = op.splitext(filename)[0] + '.npz'
+        c, m, i, ra, dec, r, cstd, cm =isolate_low_AV(filename = filename, frac=f, mrange=mr, nrbins=nb, 
                                                        savefile=True,
                                                        datadir = datadir,
-                                                       savefiledir = resultsdir)        
+                                                       savefiledir = resultsdir,
+                                                       savefilename = savefilename)        
         cnarrow.extend(c)
         mnarrow.extend(m)
         ranarrow.extend(ra)
@@ -253,15 +262,112 @@ def make_all_isolate_AV():
     plt.axis([min(rnarrow), max(rnarrow), -0.075, 0.075])
     plt.xlabel('Major Axis Length (degrees)')
     plt.ylabel('$\Delta$(F110W - F160W)')
+    #plt.title('Color Shift Relative to F110W-F160 = '+str(rgbparam[1])+' at F160W = ' + str(rgbparam[0]))
+    plt.savefig(op.splitext(savefilename)[0] + '.rgbcolor.png', bbox_inches=0)
+
+    return
+
+def make_all_isolate_AV_for_noise_model():
+    """
+    identical to make_all_isolate_AV, but uses a much narrower magrange, to avoid biasing
+    too much against noisy pixels, and a larger fraction and pixel size, to better populate noise.
+    """
+
+    datadir = '../../Data/'
+    resultsdir = '../Unreddened/'
+
+    filelist = ['ir-sf-b01-v8-st.fits',
+                'ir-sf-b02-v8-st.fits',
+                'ir-sf-b04-v8-st.fits',
+                'ir-sf-b05-v8-st.fits',
+                'ir-sf-b06-v8-st.fits',
+                'ir-sf-b08-v8-st.fits',
+                'ir-sf-b09-v8-st.fits',
+                'ir-sf-b12-v8-st.fits',
+                'ir-sf-b14-v8-st.fits',
+                'ir-sf-b15-v8-st.fits',
+                'ir-sf-b16-v8-st.fits',
+                'ir-sf-b17-v8-st.fits',
+                'ir-sf-b18-v8-st.fits',
+                'ir-sf-b19-v8-st.fits',
+                'ir-sf-b21-v8-st.fits',
+                'ir-sf-b22-v8-st.fits',
+                'ir-sf-b23-v8-st.fits']
+
+    # initialize output vectors
+    cnarrow = []
+    mnarrow = []
+    ranarrow = []
+    decnarrow = []
+    rnarrow = []
+    ikeep_narrow = []
+    cstd_narrow = []
+    cm_narrow = []
+
+    # set up parameter values
+    f = 0.075
+    mr = [18.75, 19.75]
+    nb = 5
+    d_arcsec = 20.
+
+    for filename in filelist:
+
+        savefilename = op.splitext(filename)[0] + '.noise.npz'
+        c, m, i, ra, dec, r, cstd, cm = isolate_low_AV(filename = filename, frac=f, mrange=mr, nrbins=nb, 
+                                                       d_arcsec = d_arcsec,
+                                                       datadir = datadir,
+                                                       savefile=True,
+                                                       savefiledir = resultsdir,
+                                                       savefilename=savefilename)        
+        cnarrow.extend(c)
+        mnarrow.extend(m)
+        ranarrow.extend(ra)
+        decnarrow.extend(dec)
+        rnarrow.extend(r)
+        ikeep_narrow.extend(i)
+        cstd_narrow.extend(cstd)
+        cm_narrow.extend(cm)
+        
+        print 'Adding ', len(c), ' elements. Total stars: ', len(cnarrow)
+
+    savefilename = resultsdir + 'allbricks.noise.npz'
+    np.savez(savefilename,
+             cnarrow = np.array(cnarrow),
+             mnarrow = np.array(mnarrow),
+             ikeep_narrow = np.array(ikeep_narrow), 
+             ranarrow = np.array(ranarrow),
+             decnarrow = np.array(decnarrow),
+             rnarrow = np.array(rnarrow),
+             cstd_narrow = np.array(cstd_narrow),
+             cm_narrow = np.array(cm_narrow))
+
+    plt.figure(1)
+    plt.clf()
+    plt.plot(rnarrow, cstd_narrow, ',', color='blue', alpha=0.5)
+    plt.axis([min(rnarrow), max(rnarrow), 0, 0.15])
+    plt.xlabel('Major Axis Length (degrees)')
+    plt.ylabel('RGB width')
+    plt.title('F160W Range: ' + str(mr))
+    plt.savefig(op.splitext(savefilename)[0] + '.rgbwidth.png', bbox_inches=0)
+
+    plt.figure(2)
+    plt.clf()
+    plt.plot(rnarrow, cm_narrow, ',', color='blue', alpha=0.5)
+    plt.axis([min(rnarrow), max(rnarrow), -0.075, 0.075])
+    plt.xlabel('Major Axis Length (degrees)')
+    plt.ylabel('$\Delta$(F110W - F160W)')
     plt.title('Color Shift Relative to F110W-F160 = '+str(rgbparam[1])+' at F160W = ' + str(rgbparam[0]))
     plt.savefig(op.splitext(savefilename)[0] + '.rgbcolor.png', bbox_inches=0)
 
     return
 
-def clean_low_AZ_sample(tolerance = 0.005):
+def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
 
     resultsdir = '../Unreddened/'
-    savefilename = resultsdir + 'allbricks.npz'
+    fileroot = resultsdir + 'allbricks'
+    if makenoise:
+        fileroot = resultsdir + 'allbricks.noise'
+    savefilename = fileroot + '.npz'
 
     dat = np.load(savefilename)
     
@@ -285,7 +391,16 @@ def clean_low_AZ_sample(tolerance = 0.005):
                      ((r > 0.44) & (r < 0.6) & (cstd > 0.055)) |
                      ((r > 1.23) & (cstd > 0.035)) |
                      ((r > 0.32) & (r < 0.39)), 1, 0)
-    i_good = np.where(i_bad == 0)
+    i_bad_noise = np.where(((r>0.58) & (r <1.2) & (cstd > 0.03)) | 
+                           ((r > 1.09) & (r < 1.2) & (cstd > 0.0225)) |
+                           (r < 0.03) |
+                           ((r > 0.39) & (r < 0.44) & (cstd > 0.0425)) |
+                           ((r > 0.44) & (r < 0.6) & (cstd > 0.035)) |
+                           ((r > 0.32) & (r < 0.39)), 1, 0)
+    if makenoise:
+        i_good = np.where(i_bad_noise == 0)
+    else:
+        i_good = np.where(i_bad == 0)
     plt.plot(r[i_good], cstd[i_good], ',', color='blue', alpha=0.5)
 
     # fit a polynomial to good points
@@ -297,7 +412,7 @@ def clean_low_AZ_sample(tolerance = 0.005):
     rp = np.linspace(0, max(r), 100)
     plt.plot(rp, p(rp), color='green')
 
-    plotfilename = resultsdir + 'allbricks.clean.png'
+    plotfilename = fileroot + '.clean.png'
     plt.savefig(plotfilename, bbox_inches=0)
 
 
@@ -312,7 +427,7 @@ def clean_low_AZ_sample(tolerance = 0.005):
 
     # save clean data to a new file
 
-    newsavefilename = resultsdir + 'allbricks.clean.npz'
+    newsavefilename = fileroot + '.clean.npz'
     print 'Saving clean data to ', newsavefilename
     np.savez(newsavefilename,
              cnarrow = dat['cnarrow'][ikeep],
@@ -327,10 +442,13 @@ def clean_low_AZ_sample(tolerance = 0.005):
 
     return
 
-def read_clean():
+def read_clean(readnoise = False):
 
     resultsdir = '../Unreddened/'
     savefilename = resultsdir + 'allbricks.clean.npz'
+    if readnoise:
+        savefilename = resultsdir + 'allbricks.noise.clean.npz'
+
     dat = np.load(savefilename)
 
     c = dat['cnarrow']
@@ -347,7 +465,8 @@ def read_clean():
 def make_low_AV_cmd(c, m, 
                     mrange = [18.2, 25.], 
                     crange = [0.3,1.3], 
-                    deltapix = [0.015,0.15]):
+                    deltapix = [0.015,0.15], 
+                    masksig=[2.5,3.0]):
 
     nbins = [int((mrange[1] - mrange[0]) / deltapix[1]),
              int((crange[1] - crange[0]) / deltapix[0])]
@@ -358,37 +477,38 @@ def make_low_AV_cmd(c, m,
     extent = [cboundary[0], cboundary[-1],
               mboundary[-1], mboundary[0]]
 
-    nmag = cmd.shape[0]
-    ncol = cmd.shape[1]
+    # Generate mask and measure mean and sigma
+    foregroundmask, meancol, sigcol = mfcmd.clean_fg_cmd(cmd, masksig, 
+                                                         niter=4, showplot=0)
 
-    nsig_clip = 2.5
-    nanfix = 0.0000000000001
-    niter = 5
-
-    mask = 1.0 + np.zeros(cmd.shape)
-    for j in range(niter):
-
-        # Get mean color and width of each line
-
-        meancol = np.array([sum(np.arange(ncol) * cmd[i,:] * mask[i,:]) / 
-                            sum(cmd[i,:] * (mask[i,:] + nanfix)) for i in range(nmag)])
-        sigcol = np.array([np.sqrt(sum(cmd[i,:]*mask[i,:] *
-                                    (range(ncol) - meancol[i])**2) / 
-                                sum(cmd[i,:]*mask[i,:] + nanfix)) 
-                           for i in range(nmag)])
-
-        # Mask the region near the RGB
-
-        mask = np.array([np.where(abs(range(ncol) - meancol[i]) < 
-                                  nsig_clip*sigcol[i], 1.0, 0.0) 
-                         for i in range(nmag)])
-
-    return cmd, meancol, sigcol, cboundary, mboundary, extent
+    return cmd, foregroundmask, meancol, sigcol, cboundary, mboundary, extent
 
 
-def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19,21.5])
+def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19,21.5], 
+                            usemask=True, nsig_blue_color_cut = 2.0, maglimoff = 0.25,
+                            makenoise=False, useq=False):
+
+    mrange = [18.2, 25.]
+    #crange = [0.3,1.3] 
+    crange = [0.3,2.5] 
+    deltapixorig = [0.015,0.25] 
+    masksig=[2.5,3.0]
+    noisemasksig=[4.5,4.5]
+
+    # Define reddening parameters
+
+    Amag_AV = 0.20443
+    Acol_AV = 0.33669 - 0.20443
+    t = np.arctan(-Amag_AV / Acol_AV)
+    reference_color = 1.0
+
+    # read in cleaned, low reddening data
 
     c, m, ra, dec, r, cstd, cm = read_clean()
+
+    # convert to reddening-free mag, if requested
+    if useq:
+        m = m + (c-reference_color)*np.sin(t)/np.cos(t)
 
     # sort according to radius
 
@@ -429,19 +549,22 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
 
     print 'Splitting into ', len(nrhi),' radial bins with ',nrgbstars,' in each upper RGB.'
 
-    #
-
     # run once to get shape of CMD
-    cmd, meancol, sigcol, cboundary, mboundary, extent = make_low_AV_cmd(c,m)
+    cmd, fgmask, meancol, sigcol, cboundary, mboundary, extent = make_low_AV_cmd(c, m, 
+                                                                                mrange = mrange,
+                                                                                crange = crange,
+                                                                                deltapix = deltapixorig,
+                                                                                masksig = masksig)
     
     # setup interpolation to convert pixel values of meancol into numerical values
     mcen = (mboundary[0:-1] + mboundary[1:]) / 2.0
     ccen = (cboundary[0:-1] + cboundary[1:]) / 2.0
     cinterp  = interp1d(np.arange(len(ccen)), ccen)
-    deltapix =  [cboundary[1]-cboundary[0],mboundary[1]-mboundary[0]]
+    deltapix =  np.array([cboundary[1]-cboundary[0],mboundary[1]-mboundary[0]])
 
     # initialize storage arrays
     cmd_array = np.zeros([cmd.shape[0], cmd.shape[1], nrbins])
+    mask_array = np.zeros([cmd.shape[0], cmd.shape[1], nrbins])
     meancol_array = np.zeros([meancol.shape[0], nrbins])
     sigcol_array = np.zeros([sigcol.shape[0], nrbins])
     meanr_array = np.zeros(nrbins)
@@ -451,8 +574,8 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
 
     # initialize magnitude limit polynomials
     completenessdir = '../../Completeness/'
-    m110file = 'completeness_ra_dec.gst.F110W.npz'
-    m160file = 'completeness_ra_dec.gst.F160W.npz'
+    m110file = 'completeness_ra_dec.st.F110W.npz'
+    m160file = 'completeness_ra_dec.st.F160W.npz'
         
     m110dat = np.load(completenessdir + m110file)
     m110polyparam = m110dat['param']
@@ -466,20 +589,31 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
     plt.figure(1)
     plt.clf()
 
+    #
+    if usemask:
+        print 'Masking out noise in stddeviation range: ', masksig
+
+    # Loop through bins of radius
     for i in range(len(nrlo)):
         
-        cmd, meancol, sigcol, cboundary, mboundary, extent = make_low_AV_cmd(c[nrlo[i]:nrhi[i]],
-                                                                             m[nrlo[i]:nrhi[i]])
+        cmd, fgmask, meancol, sigcol, cboundary, mboundary, extent = make_low_AV_cmd(c[nrlo[i]:nrhi[i]],
+                                                                                    m[nrlo[i]:nrhi[i]],
+                                                                                    mrange = mrange,
+                                                                                    crange = crange,
+                                                                                    deltapix = deltapixorig,
+                                                                                    masksig = masksig)
+        # mask out noise, if requested
+        if usemask:
+            cmd = cmd * fgmask
 
         # normalize CMD to a constant # of stars for magnitudes in mnormalizerange
         irgb = np.where((mnormalizerange[0] < mboundary) & (mboundary < mnormalizerange[1]))[0]
         rgbrange = [min(irgb), max(irgb)]
         norm = np.sum(cmd[rgbrange[0]:rgbrange[1],:])
-        #norm = np.sum(np.array([cmd[j,:] for j in range(len(mcen)-1) if ((mnormalizerange[0] < mboundary[j]) & 
-        #                                                            (mboundary[j+1] < mnormalizerange[1]))]))
         nstars = np.sum(cmd)
         cmd = cmd.astype(float) / float(norm)
 
+        # copy results to appropriate array
         cmd_array[:,:,i] = cmd
         meancol_array[:,i] = cinterp(meancol)
         sigcol_array[:,i] = sigcol * deltapix[0]
@@ -493,23 +627,196 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
         maglim160 = p160(meanr_array[i])
         maglim_array[:,i] = np.array([maglim110, maglim160])
 
+        m110range = [16.0, maglim110 - maglimoff]
+        m160range = [18.4, maglim160 - maglimoff]
+
+        # generate mask
+        bluecolorlim = cboundary[np.maximum(np.rint(meancol - nsig_blue_color_cut * 
+                                                    sigcol).astype(int), 0)]
+        color_mag_datamask = mfcmd.make_data_mask(cmd, cboundary, 
+                                                  mboundary, m110range, m160range, 
+                                                  bluecolorlim)
+        if useq: 
+            color_mag_datamask = mfcmd.make_data_mask(cmd, cboundary, 
+                                                      mboundary, m110range, m160range, 
+                                                      bluecolorlim, useq=[reference_color, t])
+
+        mask_array[:,:,i] = color_mag_datamask
+
         print 'Bin: ', i, '  R: ', ("%g" % round(meanr_array[i],3)), 'maglim', ("%g" % round(maglim110,2)), ("%g" % round(maglim160,2)),' NStars: ',nstars, ' NRGB: ',norm
 
-
-        # make a mask at the same radius, using completeness information in ../../Completeness
-        if makemask:
-
-            print 'making mask....'
-
-
-        plt.imshow(cmd,  extent=extent, aspect='auto', interpolation='nearest', vmin=0, vmax = 0.1)
+        #plt.imshow(cmd,  extent=extent, aspect='auto', interpolation='nearest', vmin=0, vmax = 0.1)
+        plt.imshow(0.01*color_mag_datamask + cmd,  extent=extent, aspect='auto', interpolation='nearest', vmin=0, vmax = 0.1)
         plt.xlabel('F110W - F160W')
         plt.ylabel('F160W')
-        plt.title('Major Axis: '+str(meanr_array[i]))
+        plt.title('Major Axis: '+ ("%g" % np.round(meanr_array[i],3)) + 
+                  '  F160W 50% Completeness: ' + ("%g" % np.round(maglim160,2)))
         plt.draw()
 
+    # make a noise model, if requested
+
+    if makenoise:
+
+        noise_smooth_mag = np.array([0.05, 1.0])
+        noise_smooth = np.rint(noise_smooth_mag / deltapix)
+        #noise_smooth = [3, 10]  # mag, color, in pixels
+        print 'Building Noise Model...Smoothing with: ', noise_smooth
+
+        c_n, m_n, ra_n, dec_n, r_n, cstd_n, cm_n = read_clean(readnoise = True)
+        # convert to reddening-free mag, if requested
+        if useq:
+            m_n = m_n + (c_n-reference_color)*np.sin(t)/np.cos(t)
+
+        isort = np.argsort(r_n)
+        c_n = c_n[isort]
+        m_n = m_n[isort]
+        r_n = r_n[isort]
+        ra_n = ra_n[isort]
+        dec_n = dec_n[isort]
+        cstd_n = cstd_n[isort]
+        cm_n = cm_n[isort]
+
+        r_n_range = [min(r_n), max(r_n)]
+
+        # initialize array to save noise model
+
+        noise_array = np.zeros([cmd.shape[0], cmd.shape[1], nrbins])
+        noisefrac_array = np.zeros(nrbins)
+
+        # set up function to quickly find indices of stars within given r-range
+        i_rinterp  = interp1d(r_n, np.arange(len(r_n)))
+
+        for i in range(len(nrlo)):
+
+            # interpolate to find range of points, enforcing boundaries of interpolation
+            r_range = rrange_array[:,i]
+            i_lo = np.ceil(i_rinterp(np.maximum(r_range[0], r_n_range[0])))
+            i_hi = np.floor(i_rinterp(np.minimum(r_range[1], r_n_range[1])))
+            #i_rrange = i_rinterp(r_range)
+            #i_lo = np.ceil(i_rrange[0])
+            #i_hi = np.floor(i_rrange[1])
+
+            cmd_n, noisemask, meancol_n, sigcol_n, cboundary_n, mboundary_n, extent_n =   \
+                make_low_AV_cmd(c_n[i_lo:i_hi],
+                                m_n[i_lo:i_hi],
+                                mrange = mrange,
+                                crange = crange,
+                                deltapix = deltapixorig,
+                                masksig = noisemasksig)
+
+            nmag = noisemask.shape[0]
+            
+            # invert sense of mask, and smooth
+            noisemask = abs(noisemask - 1)
+
+            # trim blue side
+            bluecutmask = 1.0 + np.zeros(noisemask.shape)
+            bluecutmask = np.array([np.where((cboundary[:-1] > bluecolorlim[j]), 
+                                             1.0, 0.0) for j in range(nmag)])
+            noisemask = noisemask * bluecutmask
+
+
+            noise_model_orig = cmd_n * noisemask
+            noise_model = ndimage.filters.uniform_filter(noise_model_orig,
+                                                         size=noise_smooth)
+
+            # calculate fraction in noise model
+            nfg = (cmd_n * color_mag_datamask).sum()
+            nnoise = (noise_model * color_mag_datamask).sum()
+            frac_noise = nnoise / nfg
+            print 'ilo: ', i_lo, ' ihi: ', i_hi, ' Noise fraction: ', frac_noise
+
+            # do a rough normalization (will have to redo after radial interpretation and data mask)
+            noise_model = noise_model / float(nnoise)
+
+            noise_array[:,:,i] = noise_model
+            noisefrac_array[i] = frac_noise
+
+            plt.imshow(noise_model,  extent=extent, aspect='auto', interpolation='nearest')
+            plt.xlabel('F110W - F160W')
+            plt.ylabel('F160W')
+            plt.title('Major Axis: '+ ("%g" % np.round(meanr_array[i],3)) + 
+                      '  F160W 50% Completeness: ' + ("%g" % np.round(maglim160,2)))
+            plt.draw()
+
     return cmd_array, meanr_array, rrange_array, meancol_array, sigcol_array, n_array, maglim_array, mboundary, cboundary
+
+
+def get_radius_range_of_all_bricks():
+    """
+    Generate an array containing brick file names, and range of major axis length radii in the brick.
+    Returns the array and saves it to a file for reference.
+    """
         
+    datadir = '../../Data/'
+    resultsdir = '../Unreddened/'
+    radiusfile = 'radius_range_of_bricks.npz'
+
+    filelist = ['ir-sf-b01-v8-st.fits',
+                'ir-sf-b02-v8-st.fits',
+                'ir-sf-b04-v8-st.fits',
+                'ir-sf-b05-v8-st.fits',
+                'ir-sf-b06-v8-st.fits',
+                'ir-sf-b08-v8-st.fits',
+                'ir-sf-b09-v8-st.fits',
+                'ir-sf-b12-v8-st.fits',
+                'ir-sf-b14-v8-st.fits',
+                'ir-sf-b15-v8-st.fits',
+                'ir-sf-b16-v8-st.fits',
+                'ir-sf-b17-v8-st.fits',
+                'ir-sf-b18-v8-st.fits',
+                'ir-sf-b19-v8-st.fits',
+                'ir-sf-b21-v8-st.fits',
+                'ir-sf-b22-v8-st.fits',
+                'ir-sf-b23-v8-st.fits']
+
+    r_range_brick_array = np.empty((len(filelist), 7), dtype=object)
+    r_range_brick_array[:,0] = filelist
+        
+    for i, filename in enumerate(filelist): 
+        m1, m2, ra, dec = rbd.read_mag_position_gst(datadir + filename)
+        r = np.array(get_major_axis(ra, dec))
+        r_range_brick_array[i,1:] = [min(r), max(r), min(ra), max(ra), min(dec), max(dec)]
+
+    print r_range_brick_array
+
+    print 'Writing r_range_brick_array to ', radiusfile
+    np.savez(radiusfile, 
+             r_range_brick_array=r_range_brick_array)
+
+    print 'Global range of ra:  ', min(r_range_brick_array[:,3].flatten()), max(r_range_brick_array[:,4].flatten())
+    print 'Global range of dec: ', min(r_range_brick_array[:,5].flatten()), max(r_range_brick_array[:,6].flatten())
+
+    return r_range_brick_array
+
+
+def brick_files_containing_radii(r, r_range_brick_array):
+    """
+    Uses the output of "r_range_brick_array = get_radius_range_of_all_bricks()" or
+        dat = np.load('radius_range_of_bricks.npz')
+        r_range_brick_array = dat['r_range_brick_array']
+
+    Returns a filelist of the brick data files containing stars at that radius
+    """
+    rr = np.array(r_range_brick_array[:,1:3], dtype=float)
+    bricklist = r_range_brick_array[:,0:1].flatten()
+
+    #try:
+    #    # if r is an array or list
+    #    len(r)
+    return np.array([[filename for i, filename in enumerate(bricklist) if ((rr[i,0] <= r[j]) & 
+                                                                           (r[j] <= rr[i,1]))] 
+                     for j in range(len(r))])
+    #except:
+    #    return np.array([filename for i, filename in enumerate(bricklist) if ((rr[i,0] <= r) & 
+    #                                                                          (r <= rr[i,1]))])
+
+
+
+
+    
+
+
         
 
 
