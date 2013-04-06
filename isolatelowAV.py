@@ -531,7 +531,7 @@ def make_radial_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
                             crange = [0.3, 2.5],
                             deltapixorig = [0.015,0.25],
                             mnormalizerange = [19,21.5], 
-                            maglimoff = 0.25,
+                            maglimoff = [0.0, 0.25],
                             nsig_blue_color_cut = 2.0, blue_color_cut_mask_only=False,
                             usemask=True, masksig=[2.5,3.0],
                             makenoise=False, noisemasksig=[4.5,4.5],
@@ -605,7 +605,8 @@ def make_radial_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
         if (bad_dr[0] + 1 < len(nrlo) - 1):     # and is the gap not in the last, unmergeable bin?
 
             # if so, merge the first instance with the adjacent cell
-            print 'Merging ', bad_dr[0], ' with ', bad_dr[0] + 1, '.  ', len(bad_dr)-1, ' small gaps remaining.'
+            print 'Merging ', bad_dr[0], ' with ', bad_dr[0] + 1, '.  ', \
+                len(bad_dr)-1, ' small gaps remaining.'
             nrlo = np.delete(nrlo, bad_dr[0] + 1)   
             nrhi = np.delete(nrhi, bad_dr[0])
 
@@ -698,8 +699,8 @@ def make_radial_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
         maglim160 = p160(meanr_array[i])
         maglim_array[:,i] = np.array([maglim110, maglim160])
 
-        m110range = [16.0, maglim110 - maglimoff]
-        m160range = [18.4, maglim160 - maglimoff]
+        m110range = [16.0, maglim110 - maglimoff[0]]
+        m160range = [18.4, maglim160 - maglimoff[1]]
 
         # generate mask
         bluecolorlim = cboundary[np.maximum(np.rint(meancol - nsig_blue_color_cut * 

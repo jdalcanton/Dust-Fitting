@@ -429,9 +429,9 @@ def make_data_mask(fg_cmd, cedges, medges, m1range, m2range, clim, useq=0):
     nmag = fg_cmd.shape[0]
     ncol = fg_cmd.shape[1]
 
-    mask = array([where((cedges[:-1] > clim[i]) & (medges[i] > mlim2_bright) & 
-                        (medges[i] < mlim2_faint) & (medges[i] > mlim1_bright)&
-                        (medges[i] < mlim1_faint), 
+    mask = array([where((cedges[:-1] > clim[i]) & 
+                        (medges[i] > mlim2_bright) & (medges[i] < mlim2_faint) & 
+                        (medges[i] > mlim1_bright) & (medges[i] < mlim1_faint), 
                         1.0, 0.0) for i in range(nmag)])
 
     return mask
@@ -542,7 +542,7 @@ def makefakecmd(fg_cmd, cvec, mvec, AVparam, floorfrac=0.0,
 
     # add in noise model 
 
-    cmdcombo = cmdcombo + noise_model
+    cmdcombo = (1.0 - noise_frac)*cmdcombo + noise_frac*noise_model
 
     # display commands
 
@@ -906,8 +906,8 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
 
     # set up grid sizes, magnitude limits, etc
     crange    = [0.3,2.5]        # range of colors to use in CMD fitting
-    maglimoff = 0.25             # shift 50% magnitude limits this much brighter
-    deltapixorig = [0.015,0.25]  # pixel_size in CMD color, magnitude
+    maglimoff = [0.0, 0.25]      # shift 50% magnitude limits this much brighter
+    deltapixorig = [0.025,0.2]  # pixel_size in CMD color, magnitude
     mfitrange = [18.7,21.3]      # range for doing selection for "narrow" RGB
     d_arcsec = 7.5               # resolution of ra-dec grid for result
     floorfrac_value = 0.05       # define fraction of uniform "noise" to include in data model
@@ -970,8 +970,8 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
     p110 = poly1d(m110polyparam)
     p160 = poly1d(m160polyparam)
 
-    maglim110_array = p110(r_array) - maglimoff
-    maglim160_array = p160(r_array) - maglimoff
+    maglim110_array = p110(r_array) - maglimoff[0]
+    maglim160_array = p160(r_array) - maglimoff[1]
 
     m160brightlim = 18.5
     m110brightlim = m160brightlim + crange[0]
@@ -1044,16 +1044,20 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
     # Loop through all possible r values
     # Try implementing with python map()
 
-    #for i_r in range(len(r_intervals) - 1):
-    for i_r in [12]:
+    for i_r in range(len(r_intervals) - 1):
+    #for i_r in [12]:
 
-        # only analyze a radial range if some of the r-interval is covered by the brick
-        if (((r_intervals[i_r]   >= r_range[0]) & (r_intervals[i_r]   <= r_range[1])) | 
-            ((r_intervals[i_r+1] >= r_range[0]) & (r_intervals[i_r+1] <= r_range[1]))) :
+        # only analyze a radial range if some of the r-interval is
+        # covered by the brick
+        if (((r_intervals[i_r]   >= r_range[0]) & 
+             (r_intervals[i_r]   <= r_range[1])) | 
+            ((r_intervals[i_r+1] >= r_range[0]) & 
+             (r_intervals[i_r+1] <= r_range[1]))) :
 
             # get ra-dec pixels in the appropriate radial range
         
-            i_ra, i_dec = where((r_array > r_intervals[i_r]) & (r_array <= r_intervals[i_r + 1]))
+            i_ra, i_dec = where((r_array > r_intervals[i_r]) & 
+                                (r_array <= r_intervals[i_r + 1]))
             
             print 'Fitting ',len(i_ra),' pixels in radial range ', \
                 round(r_intervals[i_r],2), round(r_intervals[i_r+1],2), \
@@ -1075,6 +1079,30 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
 
             noise_model = noise_model * datamask
             noise_model = noise_model / noise_model.sum()
+
+            #
+            #plt.figure(2)
+            #plt.clf()
+            #max_fg = nanmax(fg_cmd)
+            #plt.imshow(fg_cmd, interpolation='nearest', aspect='auto', vmin=0, vmax=max_fg)
+            #plt.draw()
+
+            #plt.figure(3)
+            #plt.clf()
+            #plt.imshow(datamask, interpolation='nearest', aspect='auto', vmin=0, vmax=1)
+            #plt.draw()
+
+            plt.figure(5)
+            plt.clf()
+            img = makefakecmd(fg_cmd, color_boundary, qmag_boundary,
+                          [-0.01, 1.5, 0.5, 0.20443, 
+                           (0.33669 - 0.20443)], 
+                          floorfrac=floorfrac_value, 
+                          mask=datamask, SHOWPLOT=False,
+                          noise_model = noise_model,
+                          noise_frac = noise_frac)
+            plt.imshow(img, interpolation='nearest', aspect='auto')
+            plt.draw()
 
             # get magnitude limits of interval
         
@@ -1099,6 +1127,7 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
 
                     i_c, i_q = get_star_indices(c[i_stars], q[i_stars], 
                                                 color_boundary, qmag_boundary)
+                    plt.plot(i_c,i_q,',',color='white')
 
                     # cull points fainter than the magnitude limits, 
                     #     if there are sufficient stars
@@ -1112,6 +1141,12 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
                     i_c = i_c[i_keep]
                     i_q = i_q[i_keep]
 
+                    # cross check against datamask
+
+                    i_keep = where(datamask[i_q, i_c] != 0)
+                    i_c = i_c[i_keep]
+                    i_q = i_q[i_keep]
+
                     nstar = len(i_c)
                     #print 'Pixel ', i_pix, ' has ', nstar_1,' stars before, ', nstar,' after'
 
@@ -1119,6 +1154,8 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
 
                 if nstar > n_fit_min: 
 
+                    plt.plot(i_c,i_q,',',color='red')
+                    plt.draw()
 
                     ## run fit...
                     samp, d, bestfit, sigma, acor = run_emcee(i_c, i_q,
@@ -1129,17 +1166,17 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
                                                               nburn=nburn)
 
                     # record results in output arrays
-                    bestfit_values[i_ra, i_dec, :] = bestfit
+                    bestfit_values[i_ra[i_pix], i_dec[i_pix], :] = bestfit
                     sigmavec = sigma.flatten()
-                    percentile_values[i_ra, i_dec, :] = sigmavec
+                    percentile_values[i_ra[i_pix], i_dec[i_pix], :] = sigmavec
                     idx = d['lnp'].argmax()
-                    quality_values[i_ra, i_dec, :] = [(d['lnp'][idx])/nstar, nstar]
+                    quality_values[i_ra[i_pix], i_dec[i_pix], :] = [(d['lnp'][idx])/nstar, nstar]
                     
                     # change x=ln(f/(1-f)) to f in bestfit and percentile
-                    x = bestfit_values[i_ra, i_dec, 0]
-                    bestfit_values[i_ra, i_dec, 0] = exp(x) / (1.0 + exp(x))
-                    x = percentile_values[i_ra, i_dec, 0:3]
-                    percentile_values[i_ra, i_dec, 0:3] = exp(x) / (1.0 + exp(x))
+                    x = bestfit_values[i_ra[i_pix], i_dec[i_pix], 0]
+                    bestfit_values[i_ra[i_pix], i_dec[i_pix], 0] = exp(x) / (1.0 + exp(x))
+                    x = percentile_values[i_ra[i_pix], i_dec[i_pix], 0:3]
+                    percentile_values[i_ra[i_pix], i_dec[i_pix], 0:3] = exp(x) / (1.0 + exp(x))
                 
                     ## if requested, plot results
 
@@ -1163,14 +1200,22 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
                 else:        # if not enough stars to fit, insert dummy value
 
                     dummy = array([-666, -666, -666])
-                    bestfit_values[i_ra, i_dec, :] = [-666, -666, -666]
-                    percentile_values[i_ra, i_dec, :] = [-666, -666, -666,
+                    bestfit_values[i_ra[i_pix], i_dec[i_pix], :] = [-666, -666, -666]
+                    percentile_values[i_ra[i_pix], i_dec[i_pix], :] = [-666, -666, -666,
                                                           -666, -666, -666,
                                                           -666, -666, -666]
-                    quality_values[i_ra, i_dec, :] = [-666, nstar]
+                    quality_values[i_ra[i_pix], i_dec[i_pix], :] = [-666, nstar]
                     acor = -666
                 
                 print i_ra[i_pix], i_dec[i_pix], bestfit_values[i_ra[i_pix], i_dec[i_pix]], acor, quality_values[i_ra[i_pix], i_dec[i_pix]]
+
+            plt.figure(4)
+            plt.clf()
+            plt.imshow(bestfit_values[:,::-1,1],vmin=0, vmax=4, 
+                       extent=[ra_range[0], ra_range[1], dec_range[0], dec_range[1]],
+                       interpolation='nearest', 
+                       origin='upper')
+            plt.draw
 
         else:
 
@@ -1178,28 +1223,31 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
 
     # Record results to file
 
-    #if op.isfile(filename):  # check if file exists, to avoid overwrites
-    #    # if it does, append some random characters
-    #    print 'Output file ', filename, ' exists. Changing filename...'
-    #    filenameorig = filename
-    #    filename = op.splitext(filenameorig)[0] + '.' + id_generator(4) + '.npz'
-    #    print 'New name: ', filename
+    filename = '../Results/newfit_test.npz'
+    if op.isfile(filename):  # check if file exists, to avoid overwrites
+        # if it does, append some random characters
+        print 'Output file ', filename, ' exists. Changing filename...'
+        filenameorig = filename
+        filename = op.splitext(filenameorig)[0] + '.' + id_generator(4) + '.npz'
+        print 'New name: ', filename
 
-    #try: 
-    #    print 'Saving results to ',filename
-    #    savez(filename, 
-    #          bestfit_values=bestfit_values, 
-    #          percentile_values=percentile_values,
-    #          quality_values=quality_values,
-    #          ra_bins = ra_local,
-    #          dec_bins = dec_local)
-    #except:
-    #    print 'Failed to save file', filename
+    try: 
+        print 'Saving results to ',filename
+        savez(filename, 
+              bestfit_values=bestfit_values, 
+              percentile_values=percentile_values,
+              quality_values=quality_values,
+              ra_local = ra_local,
+              dec_local = dec_local,
+              ra_global = ra_global,
+              dec_global = dec_global)
+    except:
+        print 'Failed to save file', filename
 
-    #try:
-    #    plot_bestfit_results(results_file = filename, brickname=filename)
-    #except:
-    #    print 'Failed to plot results'
+    try:
+        plot_bestfit_results(results_file = filename, brickname=filename)
+    except:
+        print 'Failed to plot results'
 
     return bestfit_values, percentile_values
 
@@ -1377,6 +1425,7 @@ def ln_priors(p):
     # set up gaussians
     p0mean = 0.0              # symmetric in x means mean of f=0.5
     p0stddev = 1.0
+    p0stddev = 0.5
     #p0mean = 0.5              # f=0.5 when not much other information
     #p0stddev = 0.25
 
@@ -1459,7 +1508,8 @@ def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2], likelihoodfunction='',
 
 
 def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0, 
-                    keylist=['x', 'A_V', 'w', 'lnp']):
+                    keylist=['x', 'A_V', 'w', 'lnp'],
+                    model = ''):
 
     ##  morgan's plotting code, takes standard keywords
     #ezfig.plotCorr(d, d.keys())
@@ -1485,7 +1535,8 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0,
         ax.set_xlabel(k)
     plt.draw()
 
-    model = array(makefakecmd_AVparamsonly(bestfit))
+    if (model == ''):
+        model = array(makefakecmd_AVparamsonly(bestfit))
     extent = [color_boundary[0], color_boundary[-1],
               qmag_boundary[-1], qmag_boundary[0]]
 
@@ -1572,7 +1623,6 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0,
         plt.xlabel('F110W - F160W')
         plt.ylabel('Extinction Corrected F160W')
         #plt.title('Model')
-        plt.draw()
 
     plt.draw()
 
