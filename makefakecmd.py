@@ -7,6 +7,7 @@ import PIL
 import time
 import ezfig  # morgan's plotting code
 import read_brick_data as rbd
+import isolatelowAV as iAV
 from scipy import ndimage
 import string
 import os.path as op
@@ -396,22 +397,29 @@ def make_data_mask(fg_cmd, cedges, medges, m1range, m2range, clim, useq=0):
     m1lims = 2 element vector for blue filter [bright,faint]  
     m2lims = 2 element vector for red filter [bright,faint]   
     useq = if set, assume fg_cmd is rotated to reddening free mags, 
-           and translate mag limits accordingly. Assume value = [c0,t]
+           and translate mag limits accordingly. Assume value = [c0=reference_color]
     clim = color to cut on blue side
 
     Returns mask of 1's where data falls within magnitude limits
     """
     mask = 1.0 + zeros(fg_cmd.shape)
 
+    # Define reddening parameters
+
+    #print 'Defining reddening parameters'
+    Amag_AV = 0.20443
+    Acol_AV = 0.33669 - 0.20443
+    #t = np.arctan(-Amag_AV / Acol_AV)
+
     if useq != 0:
         c0 = useq[0]
-        t = useq[1]
-        mlim2_faint  = m2range[1] + (cedges[:-1] - c0)*sin(t)/cos(t)
-        mlim2_bright = m2range[0] + (cedges[:-1] - c0)*sin(t)/cos(t)
+        #t = useq[1]
+        mlim2_faint  = m2range[1] + (cedges[:-1] - c0)*(-Amag_AV / Acol_AV)
+        mlim2_bright = m2range[0] + (cedges[:-1] - c0)*(-Amag_AV / Acol_AV)
         mlim1_faint  = ((m1range[1] - cedges[:-1]) + 
-                        (cedges[:-1] - c0)*sin(t)/cos(t))
+                        (cedges[:-1] - c0)*(-Amag_AV / Acol_AV))
         mlim1_bright = ((m1range[0] - cedges[:-1]) + 
-                        (cedges[:-1] - c0)*sin(t)/cos(t))
+                        (cedges[:-1] - c0)*(-Amag_AV / Acol_AV))
     else:
         mlim2_faint  = m2range[1] + 0.0*cedges[:-1]
         mlim2_bright = m2range[0] + 0.0*cedges[:-1]
@@ -430,7 +438,7 @@ def make_data_mask(fg_cmd, cedges, medges, m1range, m2range, clim, useq=0):
 
 ############# CODE TO GENERATE MODEL CMD #######################
 
-def makefakecmd(fg_cmd, cvec, mvec, AVparam, c0, floorfrac=0.0, 
+def makefakecmd(fg_cmd, cvec, mvec, AVparam, floorfrac=0.0, 
                 mask = 1.0, SHOWPLOT=True, 
                 noise_model=0.0, noise_frac=0.0):
     """
@@ -581,7 +589,7 @@ def makefakecmd_AVparamsonly(param):
     return makefakecmd(foreground_cmd, color_boundary, qmag_boundary,
                        [param[0], param[1], param[2], 0.20443, 
                         (0.33669 - 0.20443)], 
-                       reference_color, floorfrac=floorfrac_value, 
+                       floorfrac=floorfrac_value, 
                        mask=color_qmag_datamask, SHOWPLOT=False,
                        noise_model = noise_model)
 
@@ -680,89 +688,89 @@ floorfrac_value = 0.05
 
 # generate foreground CMD in reddening free magnitudes
 
-clo, mlo, ilo, cnar, mnar, inr, cm, cstd = isolate_low_AV_color_mag(
-                    filename=fn, frac=0.025, mrange=mfitrange, d_arcsec=10.)
+#clo, mlo, ilo, cnar, mnar, inr, cm, cstd = isolate_low_AV_color_mag(
+#                    filename=fn, frac=0.025, mrange=mfitrange, d_arcsec=10.)
 
-qnar = mnar + (cnar-reference_color)*sin(t)/cos(t)
+#qnar = mnar + (cnar-reference_color)*(-Amag_AV / Acol_AV)
 
-foreground_cmd_orig, qmag_boundary, color_boundary = histogram2d(qnar, cnar, 
-                                 range=[sort(m160range), crange], bins=nbins)
+#foreground_cmd_orig, qmag_boundary, color_boundary = histogram2d(qnar, cnar, 
+#                                 range=[sort(m160range), crange], bins=nbins)
 
-foregroundmask, meancol, sigcol = clean_fg_cmd(foreground_cmd_orig, [3.0,3.5], 
-                                               niter=4, showplot=0)
+#foregroundmask, meancol, sigcol = clean_fg_cmd(foreground_cmd_orig, [3.0,3.5], 
+#                                               niter=4, showplot=0)
 
-foreground_cmd = foreground_cmd_orig * foregroundmask
+#foreground_cmd = foreground_cmd_orig * foregroundmask
 
 # make the noise model by masking out foreground and smoothing
 
-noisemask, meancol, sigcol = clean_fg_cmd(foreground_cmd_orig, [4.5,4.5], 
-                                          niter=5, showplot=0)
-noisemask = abs(noisemask - 1)
-noise_smooth = [3, 10]  # mag, color, in pixels
-noise_model_orig = foreground_cmd_orig * noisemask
-noise_model = ndimage.filters.uniform_filter(noise_model_orig,
-                                             size=noise_smooth)
+#noisemask, meancol, sigcol = clean_fg_cmd(foreground_cmd_orig, [4.5,4.5], 
+#                                          niter=5, showplot=0)
+#noisemask = abs(noisemask - 1)
+#noise_smooth = [3, 10]  # mag, color, in pixels
+#noise_model_orig = foreground_cmd_orig * noisemask
+#noise_model = ndimage.filters.uniform_filter(noise_model_orig,
+#                                             size=noise_smooth)
 
 # generate mask of data regions to ignore
 
-nsig_blue_color_cut = 2.0
-bluecolorlim = color_boundary[maximum(rint(meancol - nsig_blue_color_cut * 
-                                           sigcol).astype(int),0)]
-color_qmag_datamask = make_data_mask(foreground_cmd, color_boundary, 
-                                     qmag_boundary, m110range, m160range, 
-                                     bluecolorlim, useq=[reference_color, t])
+#nsig_blue_color_cut = 2.0
+#bluecolorlim = color_boundary[maximum(rint(meancol - nsig_blue_color_cut * 
+#                                           sigcol).astype(int),0)]
+#color_qmag_datamask = make_data_mask(foreground_cmd, color_boundary, 
+#                                     qmag_boundary, m110range, m160range, 
+#                                     bluecolorlim, useq=[reference_color])
 
 # relative normalization of foreground model and noise model
 
-nfg = (foreground_cmd * color_qmag_datamask).sum()
-nnoise = (noise_model * color_qmag_datamask).sum()
-frac_noise = nnoise / (nnoise + nfg)
-print 'Noise fraction: ', frac_noise
+#nfg = (foreground_cmd * color_qmag_datamask).sum()
+#nnoise = (noise_model * color_qmag_datamask).sum()
+#frac_noise = nnoise / (nnoise + nfg)
+#print 'Noise fraction: ', frac_noise
 
 # read in main data file
 
-m1, m2, ra, dec = rbd.read_mag_position_gst(fn)
-m = array(m2)
-c = array(m1 - m2)
-q = m + (c-reference_color)*sin(t)/cos(t)
-ra = array(ra)
-dec = array(dec)
+#m1, m2, ra, dec = rbd.read_mag_position_gst(fn)
+#m = array(m2)
+#c = array(m1 - m2)
+#q = m + (c-reference_color)*(-Amag_AV / Acol_AV)
+#ra = array(ra)
+#dec = array(dec)
 
 # exclude data outside the color-magnitude range
 
-igood = where((c > color_boundary[0]) & (c < color_boundary[-1]) &
-              (q > qmag_boundary[0]) & (q < qmag_boundary[-1]))
-m = m[igood]
-c = c[igood]
-q = q[igood]
-ra = ra[igood]
-dec = dec[igood]
+#igood = where((c > color_boundary[0]) & (c < color_boundary[-1]) &
+#              (q > qmag_boundary[0]) & (q < qmag_boundary[-1]))
+#m = m[igood]
+#c = c[igood]
+#q = q[igood]
+#ra = ra[igood]
+#dec = dec[igood]
 
 # exclude data outside the data mask
 
-i_c, i_q = get_star_indices(c, q, color_boundary, qmag_boundary)
-igood = where(color_qmag_datamask[i_q, i_c] != 0)
-m = m[igood]
-c = c[igood]
-q = q[igood]
-ra = ra[igood]
-dec = dec[igood]
-i_c = i_c[igood]
-i_q = i_q[igood]
+#i_c, i_q = get_star_indices(c, q, color_boundary, qmag_boundary)
+#igood = where(color_qmag_datamask[i_q, i_c] != 0)
+#m = m[igood]
+#c = c[igood]
+#q = q[igood]
+#ra = ra[igood]
+#dec = dec[igood]
+#i_c = i_c[igood]
+#i_q = i_q[igood]
 
 # split into RA-Dec
 
-binarcsec = 10.0
-i_ra_dec_vals, ra_bins, dec_bins = split_ra_dec(ra, dec, d_arcsec = binarcsec)
+#binarcsec = 10.0
+#i_ra_dec_vals, ra_bins, dec_bins = split_ra_dec(ra, dec, d_arcsec = binarcsec)
 
 # grab data for a test bin, if needed for testing.
 
-i_test_ra = 60
-i_test_dec = 20
-ctest = c[i_ra_dec_vals[i_test_ra,i_test_dec]]
-mtest = m[i_ra_dec_vals[i_test_ra,i_test_dec]]
-qtest = q[i_ra_dec_vals[i_test_ra,i_test_dec]]
-i_ctest, i_qtest = get_star_indices(ctest, qtest, color_boundary, qmag_boundary)
+#i_test_ra = 60
+#i_test_dec = 20
+#ctest = c[i_ra_dec_vals[i_test_ra,i_test_dec]]
+#mtest = m[i_ra_dec_vals[i_test_ra,i_test_dec]]
+#qtest = q[i_ra_dec_vals[i_test_ra,i_test_dec]]
+#i_ctest, i_qtest = get_star_indices(ctest, qtest, color_boundary, qmag_boundary)
 
 
 ########### CODE FOR LOOPING THROUGH RA-DEC BINS, RUNNING EMCEE ########
@@ -805,7 +813,35 @@ def generate_global_ra_dec_grid(d_arcsec=7.5):
 
     return ra_bins, dec_bins
 
+def extract_local_subgrid(ra_range, dec_range, 
+                          ra_bins_global, dec_bins_global):
+    """
+    For a given range in ra and dec (rarange=[ramin, ramax], decrange
+    = [decmin, decmax]), extract only the relevant subgrid of the
+    global ra, dec grid defined by ra_bins_global and dec_bins_global
+    (evenly spaced boundaries of global grid).
 
+    Returns ra_bins_local, dec_bins_local and [iramin, iramax],
+    [idecmin, idecmax] to show where resulting local array should be
+    placed back in the global array:
+        array_global[iramin:iramax, idecmin:idecmax] = array_local
+    """
+    dra = ra_bins_global[1] - ra_bins_global[0]
+    ddec = dec_bins_global[1] - dec_bins_global[0]
+
+    i_ra =  (array(ra_range)  - ra_bins_global[0])  / dra
+    i_dec = (array(dec_range) - dec_bins_global[0]) / ddec
+
+    i_ra[0]  = (floor(i_ra[0])).astype(int)
+    i_dec[0] = (floor(i_dec[0])).astype(int)
+
+    i_ra[1]  = (ceil(i_ra[1] + 1)).astype(int)   # add 1 for slicing to work
+    i_dec[1] = (ceil(i_dec[1] + 1)).astype(int)  # add 1 for slicing to work
+
+    return ra_bins_global[i_ra[0]:i_ra[1]], dec_bins_global[i_dec[0]:i_dec[1]], i_ra, i_dec
+
+
+    
 def get_ra_dec_bin(i_ra=60, i_dec=20):
     
     i_ctest, i_qtest = get_star_indices(c[i_ra_dec_vals[i_ra,i_dec]], 
@@ -813,6 +849,361 @@ def get_ra_dec_bin(i_ra=60, i_dec=20):
                                         color_boundary, qmag_boundary)
     return i_ctest, i_qtest
 
+
+
+class likelihoodobj(object):
+
+    def __init__(self, foreground_cmd, noise_model, datamask, color_boundary, mag_boundary, 
+                 noise_frac, floorfrac_value):
+        self.foreground_cmd = foreground_cmd
+        self.noise_model = noise_model
+        self.datamask = datamask
+        self.color_boundary = color_boundary
+        self.mag_boundary = mag_boundary
+        self.noise_frac = noise_frac
+        self.floorfrac_value = floorfrac_value
+
+    def __call__(self, param, i_star_color, i_star_magnitude):
+
+        lnp = ln_priors(param)
+
+        if (lnp == -Inf):     # parameters out of range
+            return -Inf
+
+        # calculate probability distribution
+
+        img = makefakecmd(self.foreground_cmd, self.color_boundary, self.mag_boundary,
+                          [param[0], param[1], param[2], 0.20443, 
+                           (0.33669 - 0.20443)], 
+                          floorfrac=self.floorfrac_value, 
+                          mask=self.datamask, SHOWPLOT=False,
+                          noise_model = self.noise_model,
+                          noise_frac = self.noise_frac)
+    
+        # calculate log likelihood
+
+        pval = img[i_star_magnitude, i_star_color]
+
+        lnlikelihood =  (log(pval[where(pval > 0)])).sum()
+
+        return lnp + lnlikelihood
+
+    def map_call(self, args):
+
+        return self(*args)
+
+def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
+    """
+    For a given fits file, do all the necessary prep for running fits
+    - read file
+    - extract appropriate ra-dec subgrid
+    - calculate major axis length radius for each pixel
+    - Load unreddened foreground, noise, & mask
+      (using same color, mag range as data)
+    - trim data to appropriate color, mag range (global CMD range + datamask)
+    - grid data in ra-dec
+    """
+
+    # set up grid sizes, magnitude limits, etc
+    crange    = [0.3,2.5]        # range of colors to use in CMD fitting
+    maglimoff = 0.25             # shift 50% magnitude limits this much brighter
+    deltapixorig = [0.015,0.25]  # pixel_size in CMD color, magnitude
+    mfitrange = [18.7,21.3]      # range for doing selection for "narrow" RGB
+    d_arcsec = 7.5               # resolution of ra-dec grid for result
+    floorfrac_value = 0.05       # define fraction of uniform "noise" to include in data model
+    dr = 0.025                   # radius interval within which to do analyses
+    r_interval_range = [0.2, 1.4]
+    nrgbstars = 3000
+    n_substeps = 6
+    n_fit_min = 15
+
+    # Define reddening parameters
+
+    Amag_AV = 0.20443
+    Acol_AV = 0.33669 - 0.20443
+    t = arctan(-Amag_AV / Acol_AV)
+    reference_color = 1.0
+
+    # read in data file
+
+    m1, m2, ra, dec = rbd.read_mag_position_gst(datafile)
+    m = array(m2)
+    c = array(m1 - m2)
+    ra = array(ra)
+    dec = array(dec)
+    ra_range = [min(ra), max(ra)]
+    dec_range = [min(dec), max(dec)]
+
+    # Get ra-dec grid range from global ra-dec grid
+
+    ra_global, dec_global = generate_global_ra_dec_grid(d_arcsec = d_arcsec)
+    ra_local,  dec_local, ira, idec = extract_local_subgrid(ra_range, dec_range, 
+                                                            ra_global, dec_global)
+
+    # Calculate radius at each ra-dec grid point
+
+    ira, idec = indices([len(ra_local),len(dec_local)])
+    ra_vec  = ra_local[ira]
+    dec_vec = dec_local[idec]
+    ra_vec_cen = array([(ra_vec[i] + ra_vec[i+1])/2. for i in range(len(ra_vec)-1)])
+    dec_vec_cen = array([(dec_vec[i] + dec_vec[i+1])/2. for i in range(len(dec_vec)-1)])
+    
+    ira, idec = indices([len(ra_local)-1, len(dec_local)-1])
+    ra_cen_array  = (ra_local[ira] + ra_local[ira+1]) / 2.
+    dec_cen_array = (dec_local[idec] + dec_local[idec+1]) / 2.
+
+    r_array = iAV.get_major_axis(ra_cen_array, dec_cen_array)
+    r_range = [nanmin(r_array), nanmax(r_array)]
+
+    # Get range of magnitude limits to set CMD limits appropriately.
+    # (i.e., tighten in to speed computation)
+
+    completenessdir = '../../Completeness/'
+    m110file = 'completeness_ra_dec.st.F110W.npz'
+    m160file = 'completeness_ra_dec.st.F160W.npz'
+        
+    m110dat = load(completenessdir + m110file)
+    m110polyparam = m110dat['param']
+    m160dat = load(completenessdir + m160file)
+    m160polyparam = m160dat['param']
+        
+    p110 = poly1d(m110polyparam)
+    p160 = poly1d(m160polyparam)
+
+    maglim110_array = p110(r_array) - maglimoff
+    maglim160_array = p160(r_array) - maglimoff
+
+    m160brightlim = 18.5
+    m110brightlim = m160brightlim + crange[0]
+    m110range = [m110brightlim, nanmax(maglim110_array) + (deltapixorig[0] + deltapixorig[1])]
+    m160range = [m160brightlim, nanmax(maglim160_array) + deltapixorig[1]]
+    print 'F110W Range: ', m110range
+    print 'F160W Range: ', m160range
+
+    # exclude data outside the color-magnitude range
+
+    igood = where((c >= crange[0]) & (c <= crange[1]) &
+                  (m >= m160range[0]) & (m <= m160range[1]))
+    m = m[igood]
+    c = c[igood]
+    ra = ra[igood]
+    dec = dec[igood]
+
+    # Calculate reddening-free magnitude
+
+    #q = m + (c-reference_color)*sin(t)/cos(t)
+    q = m - (c-reference_color)*(Amag_AV / Acol_AV)
+
+    # Initialize unreddened CMDs and noise models
+
+    # buggy...not worth doing...
+    dr_padding = 0.1
+    r_range_limit = [r_range[0]-dr_padding, r_range[1]+dr_padding]
+    
+    foreground_cmd_array, datamask_array, noise_array, noisefrac_vec, \
+        meanr_vec, rrange_array, meancolor_array, sigmacolor_array, \
+        n_per_cmd_vec, maglim_array, qmag_boundary, color_boundary = \
+        iAV.make_radial_low_AV_cmds(nrgbstars = nrgbstars, nsubstep=n_substeps, 
+                                    mrange = m160range,
+                                    crange = crange,
+                                    deltapixorig = deltapixorig,
+                                    mnormalizerange = [19,21.5], 
+                                    maglimoff = maglimoff,
+                                    nsig_blue_color_cut = 2.0, blue_color_cut_mask_only=False,
+                                    usemask=True, masksig=[2.5,3.0],
+                                    makenoise=True, noisemasksig=[4.5,3.5],
+                                    useq=True, reference_color=reference_color,
+                                    restricted_r_range=r_range_limit)
+
+    # set up boundaries of radial interval
+    # i.e., for r_interval[i] < r < r_interval[i+1], use foreground_cmd_array[i].
+
+    r_intervals = array([(meanr_vec[i] + meanr_vec[i+1])/2.0 for i in range(len(meanr_vec)-1)])
+    r_intervals = append([0], r_intervals, nanmax(rrange_array))
+
+    # bin data into ra-dec
+
+    i_ra_dec_vals, ra_bins_out, dec_bins_out = split_ra_dec(ra, dec, d_arcsec = d_arcsec,
+                                                            ra_bins = ra_local, 
+                                                            dec_bins=dec_local)
+
+    # initialize sizes of output arrays
+    nx, ny = i_ra_dec_vals.shape
+    nz_bestfit = 3
+    nz_sigma = nz_bestfit * 3
+    nz_quality = 2
+    bestfit_values = zeros([nx, ny, nz_bestfit])
+    percentile_values = zeros([nx, ny, nz_sigma])
+    quality_values = zeros([nx, ny, nz_quality])
+    output_map = zeros([nx,ny])
+
+    # initialize fit parameters
+    param_init = [-0.05, 0.5, 0.2]  # starting at x=0 locks in, because random*0 = 0
+
+
+    # Loop through all possible r values
+    # Try implementing with python map()
+
+    #for i_r in range(len(r_intervals) - 1):
+    for i_r in [12]:
+
+        # only analyze a radial range if some of the r-interval is covered by the brick
+        if (((r_intervals[i_r]   >= r_range[0]) & (r_intervals[i_r]   <= r_range[1])) | 
+            ((r_intervals[i_r+1] >= r_range[0]) & (r_intervals[i_r+1] <= r_range[1]))) :
+
+            # get ra-dec pixels in the appropriate radial range
+        
+            i_ra, i_dec = where((r_array > r_intervals[i_r]) & (r_array <= r_intervals[i_r + 1]))
+            
+            print 'Fitting ',len(i_ra),' pixels in radial range ', \
+                round(r_intervals[i_r],2), round(r_intervals[i_r+1],2), \
+                ' Pix Fraction: ', round(float(len(i_ra)) / float(len(r_array)), 3)
+
+            output_map[i_ra,i_dec] = meanr_vec[i_r]
+            
+            # Set up datamask, foreground CMD, and noise model for r-interval
+    
+            fg_cmd = foreground_cmd_array[:, :, i_r]
+            datamask = datamask_array[:, :, i_r]
+            noise_model = noise_array[:, :, i_r]
+            noise_frac = noisefrac_vec[i_r]
+
+            # normalize models
+
+            fg_cmd = fg_cmd * datamask
+            fg_cmd = fg_cmd / fg_cmd.sum()
+
+            noise_model = noise_model * datamask
+            noise_model = noise_model / noise_model.sum()
+
+            # get magnitude limits of interval
+        
+            maglim110 = maglim_array[0, i_r]
+            maglim160 = maglim_array[1, i_r]
+
+            # set up function for likelihood fitting
+
+            lnp_func = likelihoodobj(fg_cmd, noise_model, datamask, 
+                                     color_boundary, qmag_boundary, 
+                                     noise_frac, floorfrac_value)
+
+            # loop through pixels in the radial bin, fitting for parameters
+
+            for i_pix in range(len(i_ra)):
+
+                i_stars = i_ra_dec_vals[i_ra[i_pix], i_dec[i_pix]]
+                nstar_1 = len(i_stars)
+                nstar   = len(i_stars)
+
+                if nstar_1 > n_fit_min: 
+
+                    i_c, i_q = get_star_indices(c[i_stars], q[i_stars], 
+                                                color_boundary, qmag_boundary)
+
+                    # cull points fainter than the magnitude limits, 
+                    #     if there are sufficient stars
+                
+                    i_keep = where((m[i_stars] < maglim160) &
+                                   ((c[i_stars] + m[i_stars]) < maglim110) &
+                                   (c[i_stars] >= color_boundary[0]) & 
+                                   (c[i_stars] <= color_boundary[-1]) &
+                                   (q[i_stars] >= qmag_boundary[0])  & 
+                                   (q[i_stars] <= qmag_boundary[-1]))
+                    i_c = i_c[i_keep]
+                    i_q = i_q[i_keep]
+
+                    nstar = len(i_c)
+                    #print 'Pixel ', i_pix, ' has ', nstar_1,' stars before, ', nstar,' after'
+
+                # If there are still enough stars, do fit.
+
+                if nstar > n_fit_min: 
+
+
+                    ## run fit...
+                    samp, d, bestfit, sigma, acor = run_emcee(i_c, i_q,
+                                                              param_init,
+                                                              likelihoodfunction = lnp_func,
+                                                              nwalkers=nwalkers, 
+                                                              nsteps=nsamp, 
+                                                              nburn=nburn)
+
+                    # record results in output arrays
+                    bestfit_values[i_ra, i_dec, :] = bestfit
+                    sigmavec = sigma.flatten()
+                    percentile_values[i_ra, i_dec, :] = sigmavec
+                    idx = d['lnp'].argmax()
+                    quality_values[i_ra, i_dec, :] = [(d['lnp'][idx])/nstar, nstar]
+                    
+                    # change x=ln(f/(1-f)) to f in bestfit and percentile
+                    x = bestfit_values[i_ra, i_dec, 0]
+                    bestfit_values[i_ra, i_dec, 0] = exp(x) / (1.0 + exp(x))
+                    x = percentile_values[i_ra, i_dec, 0:3]
+                    percentile_values[i_ra, i_dec, 0:3] = exp(x) / (1.0 + exp(x))
+                
+                    ## if requested, plot results
+
+                    if showplot == 'all':  # plot every entry
+                        try: 
+                            plot_mc_results(d, bestfit, datamag=i_q, datacol=i_c)
+                        except:
+                            pass
+
+                    if showplot == 'bad':  # plot only questionable fits
+
+                        if ((bestfit[0] < 0.15) | (bestfit[1] > 2) |
+                            (bestfit[0] < sigmavec[0]) | (sigmavec[2] < bestfit[0]) |
+                            (bestfit[1] < sigmavec[3]) | (sigmavec[5] < bestfit[1]) |
+                            (bestfit[2] < sigmavec[6]) | (sigmavec[8] < bestfit[2])):
+                            try: 
+                                plot_mc_results(d, bestfit, datamag=i_q, datacol=i_c)
+                            except:
+                                pass
+                
+                else:        # if not enough stars to fit, insert dummy value
+
+                    dummy = array([-666, -666, -666])
+                    bestfit_values[i_ra, i_dec, :] = [-666, -666, -666]
+                    percentile_values[i_ra, i_dec, :] = [-666, -666, -666,
+                                                          -666, -666, -666,
+                                                          -666, -666, -666]
+                    quality_values[i_ra, i_dec, :] = [-666, nstar]
+                    acor = -666
+                
+                print i_ra[i_pix], i_dec[i_pix], bestfit_values[i_ra[i_pix], i_dec[i_pix]], acor, quality_values[i_ra[i_pix], i_dec[i_pix]]
+
+        else:
+
+            print 'Skipping r_annulus: ', i_r
+
+    # Record results to file
+
+    #if op.isfile(filename):  # check if file exists, to avoid overwrites
+    #    # if it does, append some random characters
+    #    print 'Output file ', filename, ' exists. Changing filename...'
+    #    filenameorig = filename
+    #    filename = op.splitext(filenameorig)[0] + '.' + id_generator(4) + '.npz'
+    #    print 'New name: ', filename
+
+    #try: 
+    #    print 'Saving results to ',filename
+    #    savez(filename, 
+    #          bestfit_values=bestfit_values, 
+    #          percentile_values=percentile_values,
+    #          quality_values=quality_values,
+    #          ra_bins = ra_local,
+    #          dec_bins = dec_local)
+    #except:
+    #    print 'Failed to save file', filename
+
+    #try:
+    #    plot_bestfit_results(results_file = filename, brickname=filename)
+    #except:
+    #    print 'Failed to plot results'
+
+    return bestfit_values, percentile_values
+
+    #return output_map
 
 def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
                        ra_bin_num='', dec_bin_num='',
@@ -1023,7 +1414,7 @@ def ln_prob(param, i_star_color, i_star_magnitude):
     return lnp + cmdlikelihoodfunc(param, i_star_color, i_star_magnitude)
     
 
-def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2], 
+def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2], likelihoodfunction='',
               nwalkers=50, nsteps=10, nburn=150, nthreads=0, pool=None):
     # NOTE: nthreads not actually enabled!  Keep nthreads=0!
 
@@ -1037,8 +1428,13 @@ def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2],
 
     p0 = [param*(1. + random.normal(0, 0.01, ndim)) for i in xrange(nwalkers)]
     
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, ln_prob, 
+    if (likelihoodfunction == ''):
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, ln_prob, 
                                     args=[i_color,i_qmag], threads=nthreads, pool=pool)
+    else:
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, likelihoodfunction, 
+                                    args=[i_color,i_qmag], threads=nthreads, pool=pool)
+    
     
     # burn in....
     pos, prob, state = sampler.run_mcmc(p0, nburn)
@@ -1164,6 +1560,7 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0,
         plt.xlabel('F110W - F160W')
         plt.ylabel('Extinction Corrected F160W')
         plt.title('Foreground')
+        plt.draw()
 
     else:
 
@@ -1175,6 +1572,7 @@ def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0,
         plt.xlabel('F110W - F160W')
         plt.ylabel('Extinction Corrected F160W')
         #plt.title('Model')
+        plt.draw()
 
     plt.draw()
 
