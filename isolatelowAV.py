@@ -217,14 +217,18 @@ def make_all_isolate_AV():
     mr = [19.0, 22.0]
     nb = 5
 
+    f = 0.1
+    nb = 10
+
     for filename in filelist:
 
         savefilename = op.splitext(filename)[0] + '.npz'
-        c, m, i, ra, dec, r, cstd, cm =isolate_low_AV(filename = filename, frac=f, mrange=mr, nrbins=nb, 
-                                                       savefile=True,
-                                                       datadir = datadir,
-                                                       savefiledir = resultsdir,
-                                                       savefilename = savefilename)        
+        c, m, i, ra, dec, r, cstd, cm =isolate_low_AV(filename = filename, frac=f, mrange=mr, 
+                                                      nrbins=nb, 
+                                                      savefile=True,
+                                                      datadir = datadir,
+                                                      savefiledir = resultsdir,
+                                                      savefilename = savefilename)        
         cnarrow.extend(c)
         mnarrow.extend(m)
         ranarrow.extend(ra)
@@ -377,7 +381,7 @@ def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
 
     plt.figure(1)
     plt.clf()
-    plt.plot(r, cstd, ',', color='red', alpha=0.5)
+    plt.plot(r, cstd, ',', color='black', alpha=0.5)
     plt.axis([0, 1.35, 0, 0.15])
     plt.xlabel('Major Axis Length (degrees)')
     plt.ylabel('RGB width')
@@ -385,7 +389,7 @@ def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
     # do a first cull on obvious bad regions
 
     i_bad = np.where(((r>0.58) & (r <1.2) & (cstd > 0.052)) | 
-                     ((r > 1.09) & (r < 1.2)) |
+                     ((r > 1.05) & (r < 1.25)) |
                      (r < 0.03) |
                      ((r > 0.39) & (r < 0.44) & (cstd > 0.075)) |
                      ((r > 0.44) & (r < 0.6) & (cstd > 0.055)) |
@@ -401,29 +405,67 @@ def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
         i_good = np.where(i_bad_noise == 0)
     else:
         i_good = np.where(i_bad == 0)
-    plt.plot(r[i_good], cstd[i_good], ',', color='blue', alpha=0.5)
+    plt.plot(r[i_good], cstd[i_good], ',', color='green', alpha=0.5)
 
-    # fit a polynomial to good points
-    npoly = 8
+    # fit polynomials to good points
+
+    npoly = 8                #...... RGB width
     param = np.polyfit(r[i_good], cstd[i_good], npoly)
     print 'Polynomial: ', param 
-
     p = np.poly1d(param)
+
     rp = np.linspace(0, max(r), 100)
-    plt.plot(rp, p(rp), color='green')
 
-    plotfilename = fileroot + '.clean.png'
-    plt.savefig(plotfilename, bbox_inches=0)
+    npoly = 6                #..... RGB color
+    param_cm = np.polyfit(r[i_good], cm[i_good], npoly)
+    print 'Polynomial: ', param_cm
 
+    p_cm = np.poly1d(param_cm)
 
     # keep everything within a given tolerance of the polynomial
 
-    ikeep = np.where((cstd - p(r) < tolerance) & (r > 0.03))
+    cm_tolfac = 2.5
+
+    #ikeep = np.where((cstd - p(r) < tolerance) & (r > 0.03))
+    ikeep = np.where(((cstd - p(r))    < tolerance) & 
+                     ((cm   - p_cm(r)) < cm_tolfac*tolerance) & 
+                     (r > 0.03))
     plt.plot(r[ikeep], cstd[ikeep], ',', color='magenta')
+    plt.plot(rp, p(rp), color='blue', linewidth=3)
 
     Acol_AV = 0.33669 - 0.20443
     print 'Tolerance in units of A_V: ', tolerance / Acol_AV
     plt.title('Tolerance = '+ ("%g" % round(tolerance,4)) + ' ($\Delta A_V$ = ' + ("%g" % round(tolerance / Acol_AV,3)) + ')')
+
+    plotfilename = fileroot + '.clean.png'
+    plt.savefig(plotfilename, bbox_inches=0)
+
+    # make other diagnostic plots
+
+    plt.figure(2)
+    plt.clf()
+    plt.plot(r, cm, ',', color='black', alpha=0.5)
+    plt.axis([0, 1.35, -0.07, 0.07])
+    plt.plot(r[ikeep], cm[ikeep], ',', color='magenta', alpha=0.5)
+    plt.plot(rp, p_cm(rp), color='blue', linewidth=3)
+    plt.xlabel('Major Axis Length (degrees)')
+    plt.ylabel('$\Delta(F110W - F160W)$')
+    plt.title('Tolerance = '+ ("%g" % round(cm_tolfac*tolerance,5)) + ' ($\Delta A_V$ = ' + ("%g" % round(cm_tolfac*tolerance / Acol_AV,3)) + ')')
+    plotfilename = fileroot + '.meancolor.clean.png'
+    plt.savefig(plotfilename, bbox_inches=0)
+
+    plt.figure(3)
+    plt.clf()
+    plt.plot(cstd, cm, ',', color='black')
+    plt.plot(cstd[ikeep], cm[ikeep], ',', color='magenta')
+    #im = plt.scatter(cstd[ikeep], cm[ikeep], c=r[ikeep], s=3, linewidth=0, vmin=0, vmax=1.35)
+    #plt.colorbar(im)
+    plt.axis([0, 0.15, -0.07, 0.07])
+    plt.xlabel('RGB Width')
+    plt.ylabel('$\Delta(F110W - F160W)$')
+    plotfilename = fileroot + '.meancolorvswidth.clean.png'
+    plt.savefig(plotfilename, bbox_inches=0)
+
 
     # save clean data to a new file
 
@@ -438,7 +480,7 @@ def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
              rnarrow = dat['rnarrow'][ikeep],
              cstd_narrow = dat['cstd_narrow'][ikeep],
              cm_narrow = dat['cm_narrow'][ikeep],
-             polyparam = param)
+             polyparam_cstd = param, polyparam_cm = param_cm)
 
     return
 
@@ -484,16 +526,17 @@ def make_low_AV_cmd(c, m,
     return cmd, foregroundmask, meancol, sigcol, cboundary, mboundary, extent
 
 
-def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19,21.5], 
-                            usemask=True, nsig_blue_color_cut = 2.0, maglimoff = 0.25,
-                            makenoise=False, useq=False):
-
-    mrange = [18.2, 25.]
-    #crange = [0.3,1.3] 
-    crange = [0.3,2.5] 
-    deltapixorig = [0.015,0.25] 
-    masksig=[2.5,3.0]
-    noisemasksig=[4.5,4.5]
+def make_radial_low_AV_cmds(nrgbstars = 2500, nsubstep=3., 
+                            mrange = [18.2, 25.],
+                            crange = [0.3, 2.5],
+                            deltapixorig = [0.015,0.25],
+                            mnormalizerange = [19,21.5], 
+                            maglimoff = 0.25,
+                            nsig_blue_color_cut = 2.0, blue_color_cut_mask_only=False,
+                            usemask=True, masksig=[2.5,3.0],
+                            makenoise=False, noisemasksig=[4.5,4.5],
+                            useq=False, reference_color=1.0,
+                            restricted_r_range=''):
 
     # Define reddening parameters
 
@@ -508,7 +551,8 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
 
     # convert to reddening-free mag, if requested
     if useq:
-        m = m + (c-reference_color)*np.sin(t)/np.cos(t)
+        #m = m + (c-reference_color)*np.sin(t)/np.cos(t)
+        m = m + (c-reference_color)*(-Amag_AV / Acol_AV)
 
     # sort according to radius
 
@@ -529,7 +573,6 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
     print 'Starting with ', len(r), ' stars total.'
     print 'Number of upper RGB Stars: ', len(irgb)
 
-    nsubstep = 3. # number of substeps (i.e. overlapping bins, centers shifted by nstar/nubstep)
     nstep = int(nrgbstars / nsubstep)
 
     nrgblo = np.arange(0, len(irgb)-nstep, nstep)
@@ -542,10 +585,10 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
     nrhi = np.where(nrhi < len(istar)-1, nrhi, len(istar)-1)     # tidy up ends again
     nrbins = len(nrhi)
 
-    print 'nrgblo: ', nrgblo
-    print 'nrgbhi: ', nrgbhi
-    print 'nrlo: ', nrlo
-    print 'nrhi: ', nrhi
+    #print 'nrgblo: ', nrgblo
+    #print 'nrgbhi: ', nrgbhi
+    #print 'nrlo: ', nrlo
+    #print 'nrhi: ', nrhi
 
     print 'Splitting into ', len(nrhi),' radial bins with ',nrgbstars,' in each upper RGB.'
 
@@ -572,12 +615,15 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
 
     print 'Reduced number of radial bins from ', nr_orig, ' to ', len(nrlo)
 
+    nrbins = len(nrhi)
+
     # run once to get shape of CMD
-    cmd, fgmask, meancol, sigcol, cboundary, mboundary, extent = make_low_AV_cmd(c, m, 
-                                                                                mrange = mrange,
-                                                                                crange = crange,
-                                                                                deltapix = deltapixorig,
-                                                                                masksig = masksig)
+    cmd, fgmask, meancol, sigcol, cboundary, mboundary, extent = \
+        make_low_AV_cmd(c, m, 
+                        mrange = mrange,
+                        crange = crange,
+                        deltapix = deltapixorig,
+                        masksig = masksig)
     
     # setup interpolation to convert pixel values of meancol into numerical values
     mcen = (mboundary[0:-1] + mboundary[1:]) / 2.0
@@ -619,12 +665,14 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
     # Loop through bins of radius
     for i in range(len(nrlo)):
         
-        cmd, fgmask, meancol, sigcol, cboundary, mboundary, extent = make_low_AV_cmd(c[nrlo[i]:nrhi[i]],
-                                                                                    m[nrlo[i]:nrhi[i]],
-                                                                                    mrange = mrange,
-                                                                                    crange = crange,
-                                                                                    deltapix = deltapixorig,
-                                                                                    masksig = masksig)
+        cmd, fgmask, meancol, sigcol, cboundary, mboundary, extent = \
+            make_low_AV_cmd(c[nrlo[i]:nrhi[i]],
+                            m[nrlo[i]:nrhi[i]],
+                            mrange = mrange,
+                            crange = crange,
+                            deltapix = deltapixorig,
+                            masksig = masksig)
+
         # mask out noise, if requested
         if usemask:
             cmd = cmd * fgmask
@@ -656,13 +704,24 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
         # generate mask
         bluecolorlim = cboundary[np.maximum(np.rint(meancol - nsig_blue_color_cut * 
                                                     sigcol).astype(int), 0)]
-        color_mag_datamask = mfcmd.make_data_mask(cmd, cboundary, 
-                                                  mboundary, m110range, m160range, 
-                                                  bluecolorlim)
-        if useq: 
+        if blue_color_cut_mask_only: 
+            color_mag_datamask = mfcmd.make_data_mask(cmd, cboundary, 
+                                                      mboundary, [0.0, 100.], [0., 100.],
+                                                      bluecolorlim)
+        else:
             color_mag_datamask = mfcmd.make_data_mask(cmd, cboundary, 
                                                       mboundary, m110range, m160range, 
-                                                      bluecolorlim, useq=[reference_color, t])
+                                                      bluecolorlim)
+        if useq: 
+
+            if blue_color_cut_mask_only: 
+                color_mag_datamask = mfcmd.make_data_mask(cmd, cboundary, 
+                                                          mboundary, [0.0, 100.], [0., 100.],
+                                                          bluecolorlim, useq=[reference_color])
+            else:
+                color_mag_datamask = mfcmd.make_data_mask(cmd, cboundary, 
+                                                          mboundary, m110range, m160range, 
+                                                          bluecolorlim, useq=[reference_color])
 
         mask_array[:,:,i] = color_mag_datamask
 
@@ -680,7 +739,7 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
 
     if makenoise:
 
-        noise_smooth_mag = np.array([0.05, 1.0])
+        noise_smooth_mag = np.array([0.2, 0.5])    # Note: filter is with opposite polarity
         noise_smooth = np.rint(noise_smooth_mag / deltapix)
         #noise_smooth = [3, 10]  # mag, color, in pixels
         print 'Building Noise Model...Smoothing with: ', noise_smooth
@@ -688,7 +747,7 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
         c_n, m_n, ra_n, dec_n, r_n, cstd_n, cm_n = read_clean(readnoise = True)
         # convert to reddening-free mag, if requested
         if useq:
-            m_n = m_n + (c_n-reference_color)*np.sin(t)/np.cos(t)
+            m_n = m_n + (c_n-reference_color)*(-Amag_AV / Acol_AV)
 
         isort = np.argsort(r_n)
         c_n = c_n[isort]
@@ -741,7 +800,7 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
 
             noise_model_orig = cmd_n * noisemask
             noise_model = ndimage.filters.uniform_filter(noise_model_orig,
-                                                         size=noise_smooth)
+                                                         size=[noise_smooth[1],noise_smooth[0]])
 
             # calculate fraction in noise model
             color_mag_datamask = mask_array[:,:,i]
@@ -764,7 +823,28 @@ def make_radial_low_AV_cmds(nrgbstars = 4000, nsubstep=3., mnormalizerange = [19
                       '  F160W 50% Completeness: ' + ("%g" % np.round(maglim160,2)))
             plt.draw()
 
-    return cmd_array, meanr_array, rrange_array, meancol_array, sigcol_array, n_array, maglim_array, mboundary, cboundary
+    if restricted_r_range != '':
+
+        print 'Trimming down to restricted radial range: ', restricted_r_range
+        # fix limits of restricted_r_range
+        restricted_r_range = [np.maximum(restricted_r_range[0],np.min(meanr_array)),
+                              np.minimum(restricted_r_range[1],np.max(meanr_array))]
+        i_rinterp  = interp1d(meanr_array, np.arange(len(meanr_array)))
+        i = i_rinterp(restricted_r_range)
+        ilo = np.maximum(int(np.floor(i[0])), 0)
+        ihi = np.minimum(int(np.ceil(i[1]) + 1), len(meanr_array))
+        print 'Grabbing index range: ', [ilo, ihi]
+        return cmd_array[:,:,ilo:ihi], mask_array[:,:,ilo:ihi], \
+            noise_array[:,:,ilo:ihi], noisefrac_array[ilo:ihi], \
+            meanr_array[ilo:ihi], rrange_array[:,ilo:ihi], \
+            meancol_array[:,ilo:ihi], sigcol_array[:,ilo:ihi], \
+            n_array[ilo:ihi], maglim_array[:,ilo:ihi], mboundary, cboundary
+    
+    else:
+
+        return cmd_array, mask_array, noise_array, noisefrac_array, \
+            meanr_array, rrange_array, meancol_array, sigcol_array, \
+            n_array, maglim_array, mboundary, cboundary
 
 
 def get_radius_range_of_all_bricks():
