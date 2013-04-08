@@ -897,7 +897,7 @@ class likelihoodobj(object):
 
         return self(*args)
 
-def run_one_brick(fileroot, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
+def run_one_brick(fileroot, datadir='../../Data/', showplot='bad', nwalkers=50, nsamp=15, nburn=150):
     """
     For a given fits file, do all the necessary prep for running fits
     - read file
@@ -927,7 +927,7 @@ def run_one_brick(fileroot, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
 
     # set up file names
 
-    datafile = '../../Data/' + fileroot + '.fits'
+    datafile = datadir + fileroot + '.fits'
     savefile = '../Results/' + fileroot + '.npz'
     completenessdir = '../../Completeness/'
     m110completenessfile = 'completeness_ra_dec.st.F110W.npz'
@@ -946,8 +946,9 @@ def run_one_brick(fileroot, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
     param_names = ['crange', 'maglimoff', 'deltapixorig', 'mfitrange', 'd_arcsec', 
                    'floorfrac_value', 'dr', 'r_interval_range', 'nrgbstars', 'n_substeps', 
                    'masksig', 'noisemasksig', 'n_fit_min', 'frac_red_mean', 
-                   'nwalkers', 'nsamp', 'nburn', 'fileroot', 'datafile', 'savefile', 
                    'Amag_AV', 'Acol_AV', 'reference_color', 
+                   'nwalkers', 'nsamp', 'nburn', 
+                   'fileroot', 'datadir', 'datafile', 'savefile', 
                    'completenessdir', 'm110completenessfile', 'm160completenessfile']
     processing_params = {k: allparamvals[k] for k in param_names}
 
