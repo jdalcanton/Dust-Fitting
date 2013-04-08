@@ -695,12 +695,12 @@ def make_radial_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
 
         # calculate corresponding magnitude limits
 
-        maglim110 = p110(meanr_array[i])
-        maglim160 = p160(meanr_array[i])
+        maglim110 = p110(meanr_array[i]) - maglimoff[0]
+        maglim160 = p160(meanr_array[i]) - maglimoff[1]
         maglim_array[:,i] = np.array([maglim110, maglim160])
 
-        m110range = [16.0, maglim110 - maglimoff[0]]
-        m160range = [18.4, maglim160 - maglimoff[1]]
+        m110range = [16.0, maglim110]
+        m160range = [18.4, maglim160]
 
         # generate mask
         bluecolorlim = cboundary[np.maximum(np.rint(meancol - nsig_blue_color_cut * 

@@ -9,6 +9,7 @@ import ezfig  # morgan's plotting code
 import read_brick_data as rbd
 import isolatelowAV as iAV
 from scipy import ndimage
+from scipy.stats import norm
 import string
 import os.path as op
 import random as rnd
@@ -429,9 +430,12 @@ def make_data_mask(fg_cmd, cedges, medges, m1range, m2range, clim, useq=0):
     nmag = fg_cmd.shape[0]
     ncol = fg_cmd.shape[1]
 
+    dm = medges[1] - medges[0]
     mask = array([where((cedges[:-1] > clim[i]) & 
                         (medges[i] > mlim2_bright) & (medges[i] < mlim2_faint) & 
                         (medges[i] > mlim1_bright) & (medges[i] < mlim1_faint), 
+                        #(medges[i] > mlim2_bright) & (mlim2_faint- medges[i] > -dm) & 
+                        #(medges[i] > mlim1_bright) & (mlim1_faint - medges[i] > -dm), 
                         1.0, 0.0) for i in range(nmag)])
 
     return mask
@@ -440,7 +444,7 @@ def make_data_mask(fg_cmd, cedges, medges, m1range, m2range, clim, useq=0):
 
 def makefakecmd(fg_cmd, cvec, mvec, AVparam, floorfrac=0.0, 
                 mask = 1.0, SHOWPLOT=True, 
-                noise_model=0.0, noise_frac=0.0):
+                noise_model=0.0, noise_frac=0.0, frac_red_mean=0.5):
     """
     fg_cmd, cvec, mvec = 2-d binned CMD of lowreddening stars, binned
             in color c & DEREDDENED magnitude m' =
@@ -467,7 +471,8 @@ def makefakecmd(fg_cmd, cvec, mvec, AVparam, floorfrac=0.0,
     # set up reddening parameters
     
     #fracred = AVparam[0]
-    fracred = exp(AVparam[0]) / (1. + exp(AVparam[0])) # x = ln(f/(1-f))
+    alpha = log(0.5) / log(frac_red_mean)
+    fracred = (exp(AVparam[0]) / (1. + exp(AVparam[0])))**(1./alpha) # x = ln(f/(1-f))
     medianAV = AVparam[1]
     stddev = AVparam[2] * medianAV
     #stddev = AVparam[2]
@@ -892,7 +897,7 @@ class likelihoodobj(object):
 
         return self(*args)
 
-def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
+def run_one_brick(fileroot, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
     """
     For a given fits file, do all the necessary prep for running fits
     - read file
@@ -909,13 +914,24 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
     maglimoff = [0.0, 0.25]      # shift 50% magnitude limits this much brighter
     deltapixorig = [0.025,0.2]  # pixel_size in CMD color, magnitude
     mfitrange = [18.7,21.3]      # range for doing selection for "narrow" RGB
-    d_arcsec = 7.5               # resolution of ra-dec grid for result
+    d_arcsec = 6.64515           # resolution of ra-dec grid for result (25 pc at 776 kpc)
     floorfrac_value = 0.05       # define fraction of uniform "noise" to include in data model
     dr = 0.025                   # radius interval within which to do analyses
-    r_interval_range = [0.2, 1.4]
-    nrgbstars = 3000
-    n_substeps = 6
+    r_interval_range = [0.2, 1.4] # range over which to calculate foreground CMDs (clips bulge)
+    nrgbstars = 3000             # target number of stars on upper RGB
+    n_substeps = 6               # number of substeps before radial foreground CMDs are independent
+    masksig = [2.5, 3.0]         # limits of data mask for clipping noise from foreground CMD
+    noisemasksig = [4.5,3.5]     # limits of noise mask for clipping foreground CMD from noise
     n_fit_min = 15
+    frac_red_mean = 0.35
+
+    # set up file names
+
+    datafile = '../../Data/' + fileroot + '.fits'
+    savefile = '../Results/' + fileroot + '.npz'
+    completenessdir = '../../Completeness/'
+    m110completenessfile = 'completeness_ra_dec.st.F110W.npz'
+    m160completenessfile = 'completeness_ra_dec.st.F160W.npz'
 
     # Define reddening parameters
 
@@ -923,6 +939,17 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
     Acol_AV = 0.33669 - 0.20443
     t = arctan(-Amag_AV / Acol_AV)
     reference_color = 1.0
+
+    # Store processing parameters in dictionary
+
+    allparamvals = locals()
+    param_names = ['crange', 'maglimoff', 'deltapixorig', 'mfitrange', 'd_arcsec', 
+                   'floorfrac_value', 'dr', 'r_interval_range', 'nrgbstars', 'n_substeps', 
+                   'masksig', 'noisemasksig', 'n_fit_min', 'frac_red_mean', 
+                   'nwalkers', 'nsamp', 'nburn', 'fileroot', 'datafile', 'savefile', 
+                   'Amag_AV', 'Acol_AV', 'reference_color', 
+                   'completenessdir', 'm110completenessfile', 'm160completenessfile']
+    processing_params = {k: allparamvals[k] for k in param_names}
 
     # read in data file
 
@@ -958,13 +985,9 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
     # Get range of magnitude limits to set CMD limits appropriately.
     # (i.e., tighten in to speed computation)
 
-    completenessdir = '../../Completeness/'
-    m110file = 'completeness_ra_dec.st.F110W.npz'
-    m160file = 'completeness_ra_dec.st.F160W.npz'
-        
-    m110dat = load(completenessdir + m110file)
+    m110dat = load(completenessdir + m110completenessfile)
     m110polyparam = m110dat['param']
-    m160dat = load(completenessdir + m160file)
+    m160dat = load(completenessdir + m160completenessfile)
     m160polyparam = m160dat['param']
         
     p110 = poly1d(m110polyparam)
@@ -975,7 +998,9 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
 
     m160brightlim = 18.5
     m110brightlim = m160brightlim + crange[0]
-    m110range = [m110brightlim, nanmax(maglim110_array) + (deltapixorig[0] + deltapixorig[1])]
+    # set up plotting range to be a tad generous.
+    m110range = [m110brightlim, (nanmax(maglim110_array) + 
+                                 (deltapixorig[0] + deltapixorig[1]))]
     m160range = [m160brightlim, nanmax(maglim160_array) + deltapixorig[1]]
     print 'F110W Range: ', m110range
     print 'F160W Range: ', m160range
@@ -996,7 +1021,7 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
 
     # Initialize unreddened CMDs and noise models
 
-    # buggy...not worth doing...
+    # limit the number of radial foreground CMDs to return to save space
     dr_padding = 0.1
     r_range_limit = [r_range[0]-dr_padding, r_range[1]+dr_padding]
     
@@ -1010,8 +1035,8 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
                                     mnormalizerange = [19,21.5], 
                                     maglimoff = maglimoff,
                                     nsig_blue_color_cut = 2.0, blue_color_cut_mask_only=False,
-                                    usemask=True, masksig=[2.5,3.0],
-                                    makenoise=True, noisemasksig=[4.5,3.5],
+                                    usemask=True, masksig=masksig,
+                                    makenoise=True, noisemasksig=noisemasksig,
                                     useq=True, reference_color=reference_color,
                                     restricted_r_range=r_range_limit)
 
@@ -1045,7 +1070,6 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
     # Try implementing with python map()
 
     for i_r in range(len(r_intervals) - 1):
-    #for i_r in [12]:
 
         # only analyze a radial range if some of the r-interval is
         # covered by the brick
@@ -1092,17 +1116,17 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
             #plt.imshow(datamask, interpolation='nearest', aspect='auto', vmin=0, vmax=1)
             #plt.draw()
 
-            plt.figure(5)
-            plt.clf()
-            img = makefakecmd(fg_cmd, color_boundary, qmag_boundary,
-                          [-0.01, 1.5, 0.5, 0.20443, 
-                           (0.33669 - 0.20443)], 
-                          floorfrac=floorfrac_value, 
-                          mask=datamask, SHOWPLOT=False,
-                          noise_model = noise_model,
-                          noise_frac = noise_frac)
-            plt.imshow(img, interpolation='nearest', aspect='auto')
-            plt.draw()
+            #plt.figure(5)
+            #plt.clf()
+            #img = makefakecmd(fg_cmd, color_boundary, qmag_boundary,
+            #              [-0.01, 1.5, 0.5, 0.20443, 
+            #               (0.33669 - 0.20443)], 
+            #              floorfrac=floorfrac_value, 
+            #              mask=datamask, SHOWPLOT=False,
+            #              noise_model = noise_model,
+            #              noise_frac = noise_frac)
+            #plt.imshow(img, interpolation='nearest', aspect='auto')
+            #plt.draw()
 
             # get magnitude limits of interval
         
@@ -1127,17 +1151,13 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
 
                     i_c, i_q = get_star_indices(c[i_stars], q[i_stars], 
                                                 color_boundary, qmag_boundary)
-                    plt.plot(i_c,i_q,',',color='white')
+                    #plt.plot(i_c,i_q,',',color='white')
 
                     # cull points fainter than the magnitude limits, 
                     #     if there are sufficient stars
-                
-                    i_keep = where((m[i_stars] < maglim160) &
-                                   ((c[i_stars] + m[i_stars]) < maglim110) &
-                                   (c[i_stars] >= color_boundary[0]) & 
-                                   (c[i_stars] <= color_boundary[-1]) &
-                                   (q[i_stars] >= qmag_boundary[0])  & 
-                                   (q[i_stars] <= qmag_boundary[-1]))
+
+                    i_keep = where((i_q >= 0) & (i_q <= datamask.shape[0]-1) &
+                                   (i_c >= 0) & (i_c <= datamask.shape[1]-1))
                     i_c = i_c[i_keep]
                     i_q = i_q[i_keep]
 
@@ -1154,8 +1174,8 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
 
                 if nstar > n_fit_min: 
 
-                    plt.plot(i_c,i_q,',',color='red')
-                    plt.draw()
+                    #plt.plot(i_c,i_q,',',color='red')
+                    #plt.draw()
 
                     ## run fit...
                     samp, d, bestfit, sigma, acor = run_emcee(i_c, i_q,
@@ -1173,10 +1193,13 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
                     quality_values[i_ra[i_pix], i_dec[i_pix], :] = [(d['lnp'][idx])/nstar, nstar]
                     
                     # change x=ln(f/(1-f)) to f in bestfit and percentile
+                    alpha = log(0.5) / log(frac_red_mean)
                     x = bestfit_values[i_ra[i_pix], i_dec[i_pix], 0]
-                    bestfit_values[i_ra[i_pix], i_dec[i_pix], 0] = exp(x) / (1.0 + exp(x))
+                    f = (exp(x) / (1.0 + exp(x)))**(1./alpha)
+                    bestfit_values[i_ra[i_pix], i_dec[i_pix], 0] = f
                     x = percentile_values[i_ra[i_pix], i_dec[i_pix], 0:3]
-                    percentile_values[i_ra[i_pix], i_dec[i_pix], 0:3] = exp(x) / (1.0 + exp(x))
+                    f = (exp(x) / (1.0 + exp(x)))**(1./alpha)
+                    percentile_values[i_ra[i_pix], i_dec[i_pix], 0:3] = f
                 
                     ## if requested, plot results
 
@@ -1215,7 +1238,7 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
                        extent=[ra_range[0], ra_range[1], dec_range[0], dec_range[1]],
                        interpolation='nearest', 
                        origin='upper')
-            plt.draw
+            plt.draw()
 
         else:
 
@@ -1223,7 +1246,7 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
 
     # Record results to file
 
-    filename = '../Results/newfit_test.npz'
+    filename = savefile
     if op.isfile(filename):  # check if file exists, to avoid overwrites
         # if it does, append some random characters
         print 'Output file ', filename, ' exists. Changing filename...'
@@ -1237,10 +1260,11 @@ def setup_data(datafile, showplot='bad', nwalkers=50, nsamp=15, nburn=150):
               bestfit_values=bestfit_values, 
               percentile_values=percentile_values,
               quality_values=quality_values,
-              ra_local = ra_local,
-              dec_local = dec_local,
+              ra_bins = ra_local,
+              dec_bins = dec_local,
               ra_global = ra_global,
-              dec_global = dec_global)
+              dec_global = dec_global,
+              processing_params = processing_params)
     except:
         print 'Failed to save file', filename
 
@@ -1308,10 +1332,14 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
                 quality_values[i_ra, i_dec, :] = [d['lnp'][idx], nstar]
 
                 # change x=ln(f/(1-f)) to f in bestfit and percentile
+                frac_red_mean = 0.5
+                alpha = log(0.5) / log(frac_red_mean)
                 x = bestfit_values[i_ra, i_dec, 0]
-                bestfit_values[i_ra, i_dec, 0] = exp(x) / (1.0 + exp(x))
+                f = (exp(x) / (1.0 + exp(x)))**alpha
+                bestfit_values[i_ra, i_dec, 0] = f
                 x = percentile_values[i_ra, i_dec, 0:3]
-                percentile_values[i_ra, i_dec, 0:3] = exp(x) / (1.0 + exp(x))
+                f = (exp(x) / (1.0 + exp(x)))**alpha
+                percentile_values[i_ra, i_dec, 0:3] = f
                 
                 # if requested, plot results
 
@@ -1411,6 +1439,63 @@ def id_generator(size=4, chars=string.ascii_uppercase + string.digits):
 
     return ''.join(rnd.choice(chars) for x in range(size))    
 
+def skew_normal(x, mean=0.0, stddev=1.0, alpha=0.0, align_mode=True, printstuff=False):
+    """
+    Return a skew_normal distribution with the desired mean and stddev. alpha controls the 
+    degree of skewness.  Based on: http://en.wikipedia.org/wiki/Skew_normal_distribution
+    """
+    
+    xsig = stddev / sqrt(1. - (2./pi) * (alpha**2 / (1. + alpha**2)))
+    xmean = mean - xsig * (alpha / sqrt(1. + alpha**2)) * sqrt(2./pi)
+
+    if align_mode:   # treat mean as desired mode
+        mode_shift_poly = [3.04035639e-29,   5.58273969e-21,  -1.67582716e-26,  -3.62284547e-18,
+                           4.30636532e-24,   1.04139549e-15,  -6.77910067e-22,  -1.74658626e-13,
+                           7.08698868e-20,   1.89492508e-11,  -4.98639476e-18,  -1.39368656e-09,
+                           2.35161849e-16,   7.08204586e-08,  -7.76046641e-15,  -2.48823548e-06,
+                           2.20786871e-13,   5.95653863e-05,  -6.65071653e-12,  -9.41834368e-04,
+                           1.60896830e-10,   9.31976144e-03,  -2.11035367e-09,  -5.12998001e-02,
+                           1.06153311e-08,  -2.71757803e-02,  -8.61473382e-09]  # from find_peak_skew_normal
+        mode_shift = poly1d(mode_shift_poly)
+        xmean = xmean - stddev * mode_shift(alpha)
+
+    if printstuff:
+        print 'Mean: ', mean, ' Stddev:  ',stddev, ' Alpha: ',alpha
+        print 'XMean:', xmean, ' XStddev: ',xsig
+    
+    return 2.0 * norm.pdf(x,loc=xmean,scale=xsig) * norm.cdf(alpha*((x - xmean)/xsig))
+
+def find_peak_skew_normal(mean=0., stddev=1.):
+    
+    avec = linspace(-10.,10.,1000)
+    x = linspace(-5.,5.,1000)
+    maxvec = array([nanmax(skew_normal(x,mean=mean,stddev=stddev,alpha=a,align_mode=False)) for a in avec])
+    pkvec = array([x[where(skew_normal(x,mean=mean,stddev=stddev,alpha=a,align_mode=False) == 
+                     maxvec[i])][0] for i, a in enumerate(avec)])
+
+    plt.plot(avec,pkvec/stddev)
+    plt.xlabel('alpha')
+    plt.ylabel('Mode / Stddev')
+
+    #approx = 1 - 2.0*norm.cdf(avec/5.6)
+    #plt.plot(avec, approx)
+    #plt.plot(avec, pkvec - approx)
+
+    #npoly=20
+    #param = polyfit(avec, pkvec-approx, npoly)
+    #print 'Polynomial fit to residuals: ',param
+    #p = poly1d(param)
+    #plt.plot(avec, p(avec))
+
+    npoly=26
+    param2 = polyfit(avec, pkvec, npoly)
+    print 'Polynomial fit to residuals: ',param2
+    p2 = poly1d(param2)
+    plt.plot(avec, p2(avec))
+    plt.plot(avec, pkvec - p2(avec))
+
+
+
 ############# CODE FOR RUNNING EMCEE AND PLOTTING RESULTS ###################
 
 def ln_priors(p):
@@ -1426,6 +1511,7 @@ def ln_priors(p):
     p0mean = 0.0              # symmetric in x means mean of f=0.5
     p0stddev = 1.0
     p0stddev = 0.5
+    p0alpha = 0.0
     #p0mean = 0.5              # f=0.5 when not much other information
     #p0stddev = 0.25
 
@@ -1450,6 +1536,10 @@ def ln_priors(p):
     lnp += -0.5 * (p[0] - p0mean) ** 2 / p0stddev**2
     #lnp += -0.5 * (p[1] - p1mean) ** 2 / p1stddev**2
     lnp += -0.5 * (p[2] - p2mean) ** 2 / p2stddev**2
+
+    #if (p0alpha != 0):  # add skewness to prior on x -- use if mean(f) != 0.5
+    #    lnp += log(2.0*norm.cdf(p0alpha * (p[0] - p0mean) / p0stddev))
+
     return lnp
 
     
