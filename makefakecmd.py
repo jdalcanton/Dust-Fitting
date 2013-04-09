@@ -1,5 +1,9 @@
 import pyfits
 from numpy import *
+# to deal with display when running as background jobs
+from matplotlib import use
+use('Agg')
+
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import pylab
@@ -923,12 +927,13 @@ def run_one_brick(fileroot, datadir='../../Data/', showplot='bad', nwalkers=50, 
     masksig = [2.5, 3.0]         # limits of data mask for clipping noise from foreground CMD
     noisemasksig = [4.5,3.5]     # limits of noise mask for clipping foreground CMD from noise
     n_fit_min = 15
-    frac_red_mean = 0.35
+    frac_red_mean = 0.5
 
     # set up file names
 
     datafile = datadir + fileroot + '.fits'
     savefile = '../Results/' + fileroot + '.npz'
+    pngfileroot = '../Results/' + fileroot
     completenessdir = '../../Completeness/'
     m110completenessfile = 'completeness_ra_dec.st.F110W.npz'
     m160completenessfile = 'completeness_ra_dec.st.F160W.npz'
@@ -1226,12 +1231,13 @@ def run_one_brick(fileroot, datadir='../../Data/', showplot='bad', nwalkers=50, 
                     dummy = array([-666, -666, -666])
                     bestfit_values[i_ra[i_pix], i_dec[i_pix], :] = [-666, -666, -666]
                     percentile_values[i_ra[i_pix], i_dec[i_pix], :] = [-666, -666, -666,
-                                                          -666, -666, -666,
-                                                          -666, -666, -666]
+                                                                        -666, -666, -666,
+                                                                        -666, -666, -666]
                     quality_values[i_ra[i_pix], i_dec[i_pix], :] = [-666, nstar]
                     acor = -666
                 
-                print i_ra[i_pix], i_dec[i_pix], bestfit_values[i_ra[i_pix], i_dec[i_pix]], acor, quality_values[i_ra[i_pix], i_dec[i_pix]]
+                print i_ra[i_pix], i_dec[i_pix], bestfit_values[i_ra[i_pix], i_dec[i_pix]], \
+                    acor, quality_values[i_ra[i_pix], i_dec[i_pix]]
 
             plt.figure(4)
             plt.clf()
@@ -1270,13 +1276,98 @@ def run_one_brick(fileroot, datadir='../../Data/', showplot='bad', nwalkers=50, 
         print 'Failed to save file', filename
 
     try:
-        plot_bestfit_results(results_file = filename, brickname=filename)
+        plot_bestfit_results(results_file = filename, brickname=fileroot, pngroot=pngfileroot)
     except:
         print 'Failed to plot results'
 
     return bestfit_values, percentile_values
 
-    #return output_map
+def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resultsdir='../Results/',
+                  mergefile='merged.npz'):
+
+    # initialize ra-dec grid
+
+    dat = load(resultsdir + savefilelist[0])
+    ra_global = dat['ra_global'].flatten()
+    dec_global = dat['dec_global'].flatten()
+
+    nx = len(ra_global) - 1
+    ny = len(dec_global) - 1
+
+    nz_bestfit = 3
+    nz_sigma = nz_bestfit * 3
+    nz_quality = 2
+    bestfit_values = zeros([nx, ny, nz_bestfit])
+    percentile_values = zeros([nx, ny, nz_sigma])
+    quality_values = zeros([nx, ny, nz_quality])
+
+    # loop through list of files
+
+    for i, savefile in enumerate(savefilelist):
+
+        print 'Merging ', resultsdir + savefilelist[i]
+
+        dat = load(resultsdir + savefilelist[i])
+        bf = dat['bestfit_values']
+        p  = dat['percentile_values']
+        q  = dat['quality_values']
+        if (len(p.shape) == 4):
+            p = p[0,:,:,:]
+        if (len(q.shape) == 4):
+            q = q[0,:,:,:]
+        ra_g  = dat['ra_global'].flatten()
+        dec_g = dat['dec_global'].flatten()
+
+        try:
+            ra_local = dat['ra_local']
+            dec_local = dat['dec_local']
+        except:
+            ra_local = dat['ra_bins']         # to deal with old file that had different name...
+            dec_local = dat['dec_bins']
+
+        nx, ny = bf[:,:,0].shape
+
+        # verify that the global arrays equal the master
+
+        if (array_equal(ra_g, ra_global) & array_equal(dec_g, dec_global)):
+
+            # find starting location for copy
+            i_x0 = where(ra_local[0]  == ra_global)[0][0]
+            i_y0 = where(dec_local[0] == dec_global)[0][0]
+
+            # copy to the right location
+
+            #bestfit_values[i_x:i_x + nx, i_y:i_y + ny, :] = bf
+            #percentile_values[i_x:i_x + nx, i_y:i_y + ny, :] = p
+            #quality_values[i_x:i_x + nx, i_y:i_y + ny, :] = q
+            
+            # don't copy -666, and check that nstars in quality values is higher than existing one 
+            # (i.e., for overlaps).
+
+            for i_x in range(len(bf[:,0,0])):
+
+                for i_y in range(len(bf[0,:,0])):
+
+                    if (quality_values[i_x0 + i_x, i_y0 + i_y, 1] < q[i_x, i_y, 1]):
+
+                        bestfit_values[i_x0 + i_x, i_y0 + i_y, :] = bf[i_x, i_y, :]
+                        percentile_values[i_x0 + i_x, i_y0 + i_y, :] = p[i_x, i_y, :]
+                        quality_values[i_x0 + i_x, i_y0 + i_y, :] = q[i_x, i_y, :]
+        
+        else:
+
+            print 'Global ra and dec do not agree for ', resultsdir + savefilelist[i]
+        
+    savez(resultsdir + mergefile,
+          bestfit_values = bestfit_values,
+          percentile_values = percentile_values,
+          quality_values = quality_values,
+          ra_bins = ra_global,
+          dec_bins = dec_global,
+          savefilelist = savefilelist)
+
+    return bestfit_values, percentile_values, quality_values
+
 
 def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
                        ra_bin_num='', dec_bin_num='',
@@ -1511,8 +1602,8 @@ def ln_priors(p):
     # set up gaussians
     p0mean = 0.0              # symmetric in x means mean of f=0.5
     p0stddev = 1.0
-    p0stddev = 0.5
-    p0alpha = 0.0
+    p0stddev = 0.75
+    p0alpha = 0.0             # for implementing skew normal prior....
     #p0mean = 0.5              # f=0.5 when not much other information
     #p0stddev = 0.25
 
@@ -1521,7 +1612,8 @@ def ln_priors(p):
     #p1stddev = 8.0            #  ...but, keep it wide so little influence
 
     p2mean = 1.0              # w = broad gaussian 
-    p2stddev = p2[1] - p2mean
+    #p2stddev = p2[1] - p2mean
+    p2stddev = 0.5
     #p2mean = AV_pix              # sigma_A
     #p2stddev = p2[1] - p2mean
 
@@ -1981,3 +2073,10 @@ def show_model_examples():
             ax.set_title('AV: %s  w/AV: %s' % (AV,wfacs[j]))
 
     plt.draw()
+
+#  set up to allow calls from the shell with arguments
+#import sys
+#
+#if __name__ == '__main__':
+#  datafile = sys.argv[1]
+#  bfarray, percarray = run_one_brick(datafile, datadir='/mnt/angst4/dstn/v8/', showplot='')
