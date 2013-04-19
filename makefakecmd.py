@@ -1,8 +1,8 @@
-import pyfits
-from numpy import *
-# to deal with display when running as background jobs
+## to deal with display when running as background jobs
 from matplotlib import use
 use('Agg')
+import pyfits
+from numpy import *
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -14,6 +14,7 @@ import read_brick_data as rbd
 import isolatelowAV as iAV
 from scipy import ndimage
 from scipy.stats import norm
+from scipy.ndimage import filters as filt
 import string
 import os.path as op
 import random as rnd
@@ -901,7 +902,9 @@ class likelihoodobj(object):
 
         return self(*args)
 
-def run_one_brick(fileroot, datadir='../../Data/', showplot='bad', nwalkers=50, nsamp=15, nburn=150):
+def run_one_brick(fileroot, datadir='../../Data/', results_extension='', 
+                  deltapixorig = [0.025,0.2], d_arcsec = 6.64515,
+                  showplot='', nwalkers=50, nsamp=15, nburn=150):
     """
     For a given fits file, do all the necessary prep for running fits
     - read file
@@ -916,24 +919,26 @@ def run_one_brick(fileroot, datadir='../../Data/', showplot='bad', nwalkers=50, 
     # set up grid sizes, magnitude limits, etc
     crange    = [0.3,2.5]        # range of colors to use in CMD fitting
     maglimoff = [0.0, 0.25]      # shift 50% magnitude limits this much brighter
-    deltapixorig = [0.025,0.2]  # pixel_size in CMD color, magnitude
+    #deltapixorig = [0.025,0.2]  # pixel_size in CMD color, magnitude
     mfitrange = [18.7,21.3]      # range for doing selection for "narrow" RGB
-    d_arcsec = 6.64515           # resolution of ra-dec grid for result (25 pc at 776 kpc)
+    #d_arcsec = 6.64515           # resolution of ra-dec grid for result (6.64515 = 25 pc at 776 kpc)
     floorfrac_value = 0.05       # define fraction of uniform "noise" to include in data model
     dr = 0.025                   # radius interval within which to do analyses
-    r_interval_range = [0.2, 1.4] # range over which to calculate foreground CMDs (clips bulge)
+    r_interval_range = [0.2, 1.8] # range over which to calculate foreground CMDs (clips bulge)
     nrgbstars = 3000             # target number of stars on upper RGB
     n_substeps = 6               # number of substeps before radial foreground CMDs are independent
     masksig = [2.5, 3.0]         # limits of data mask for clipping noise from foreground CMD
     noisemasksig = [4.5,3.5]     # limits of noise mask for clipping foreground CMD from noise
     n_fit_min = 15
-    frac_red_mean = 0.5
+    frac_red_mean = 0.4
+    param_init = [-0.05, 0.35, 0.9]  # starting at x=0 locks in, because random*0 = 0
+    prior_parameters = ln_priors(param_init, return_prior_parameters=True)
 
     # set up file names
 
     datafile = datadir + fileroot + '.fits'
-    savefile = '../Results/' + fileroot + '.npz'
-    pngfileroot = '../Results/' + fileroot
+    savefile = '../Results/' + fileroot + results_extension + '.npz'
+    pngfileroot = '../Results/' + fileroot + results_extension
     completenessdir = '../../Completeness/'
     m110completenessfile = 'completeness_ra_dec.st.F110W.npz'
     m160completenessfile = 'completeness_ra_dec.st.F160W.npz'
@@ -954,6 +959,7 @@ def run_one_brick(fileroot, datadir='../../Data/', showplot='bad', nwalkers=50, 
                    'Amag_AV', 'Acol_AV', 'reference_color', 
                    'nwalkers', 'nsamp', 'nburn', 
                    'fileroot', 'datadir', 'datafile', 'savefile', 
+                   'param_init', 'prior_parameters',
                    'completenessdir', 'm110completenessfile', 'm160completenessfile']
     processing_params = {k: allparamvals[k] for k in param_names}
 
@@ -1067,9 +1073,6 @@ def run_one_brick(fileroot, datadir='../../Data/', showplot='bad', nwalkers=50, 
     percentile_values = zeros([nx, ny, nz_sigma])
     quality_values = zeros([nx, ny, nz_quality])
     output_map = zeros([nx,ny])
-
-    # initialize fit parameters
-    param_init = [-0.05, 0.5, 0.2]  # starting at x=0 locks in, because random*0 = 0
 
 
     # Loop through all possible r values
@@ -1282,8 +1285,18 @@ def run_one_brick(fileroot, datadir='../../Data/', showplot='bad', nwalkers=50, 
 
     return bestfit_values, percentile_values
 
+
 def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resultsdir='../Results/',
-                  mergefile='merged.npz'):
+                  mergefileroot='merged'):
+
+    savefilelist = ['ir-sf-b02-v8-st.npz', 'ir-sf-b04-v8-st.npz', 'ir-sf-b05-v8-st.npz', 
+                    'ir-sf-b06-v8-st.npz', 'ir-sf-b08-v8-st.npz', 'ir-sf-b09-v8-st.npz', 
+                    'ir-sf-b12-v8-st.npz', 'ir-sf-b14-v8-st.npz', 'ir-sf-b15-v8-st.npz', 
+                    'ir-sf-b16-v8-st.npz', 'ir-sf-b17-v8-st.npz', 'ir-sf-b18-v8-st.npz', 
+                    'ir-sf-b19-v8-st.npz', 'ir-sf-b21-v8-st.npz', 'ir-sf-b22-v8-st.npz', 
+                    'ir-sf-b23-v8-st.npz']
+    mergefile = resultsdir + mergefileroot + '.npz'
+    pngfileroot = resultsdir + mergefileroot
 
     # initialize ra-dec grid
 
@@ -1293,6 +1306,9 @@ def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resul
 
     nx = len(ra_global) - 1
     ny = len(dec_global) - 1
+
+    print 'ddec: ', (dec_global[1]-dec_global[0])*3600.
+    print 'dra:  ', (ra_global[1]-ra_global[0])*3600.
 
     nz_bestfit = 3
     nz_sigma = nz_bestfit * 3
@@ -1325,6 +1341,8 @@ def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resul
             ra_local = dat['ra_bins']         # to deal with old file that had different name...
             dec_local = dat['dec_bins']
 
+        dat.close()
+
         nx, ny = bf[:,:,0].shape
 
         # verify that the global arrays equal the master
@@ -1350,23 +1368,66 @@ def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resul
 
                     if (quality_values[i_x0 + i_x, i_y0 + i_y, 1] < q[i_x, i_y, 1]):
 
-                        bestfit_values[i_x0 + i_x, i_y0 + i_y, :] = bf[i_x, i_y, :]
+                        bestfit_values[   i_x0 + i_x, i_y0 + i_y, :] = bf[i_x, i_y, :]
                         percentile_values[i_x0 + i_x, i_y0 + i_y, :] = p[i_x, i_y, :]
-                        quality_values[i_x0 + i_x, i_y0 + i_y, :] = q[i_x, i_y, :]
+                        quality_values[   i_x0 + i_x, i_y0 + i_y, :] = q[i_x, i_y, :]
         
         else:
 
             print 'Global ra and dec do not agree for ', resultsdir + savefilelist[i]
+
+    # make mask of likely bad fits
+    datamask = where(bestfit_values[:,:,1] > 0, 1., 0.)
+    datamask_bool = where(bestfit_values[:,:,1] > 0, True, False)
+
+    likelihood_cut = -6.4
+    median_filt_cut = 7
+    bf_smooth = filt.median_filter(bestfit_values, size=(3,3,1))
+    bad_pix_mask = where(bestfit_values[:,:,1] / bf_smooth[:,:,1] > median_filt_cut, 0., 1.)
+    bestfit_values_clean = bestfit_values.copy()
+    bestfit_values_clean[:,:,0] = bestfit_values[:,:,0] * bad_pix_mask + bf_smooth[:,:,0]*(1.-bad_pix_mask)
+    bestfit_values_clean[:,:,1] = bestfit_values[:,:,1] * bad_pix_mask + bf_smooth[:,:,1]*(1.-bad_pix_mask)
+    bestfit_values_clean[:,:,2] = bestfit_values[:,:,2] * bad_pix_mask + bf_smooth[:,:,2]*(1.-bad_pix_mask)
+    # helped a bit, but not much...
+    #bad_pix_mask = where((bestfit_values[:,:,2] < 0.45 - 0.45*bestfit_values[:,:,1]) |
+    #                     (quality_values[:,:,0] < likelihood_cut), 0., 1.)
+    # following cut out way too many stars
+    #bad_pix_mask = where(((bestfit_values[:,:,1] < percentile_values[:,:,3]) |
+    #                      (bestfit_values[:,:,1] > percentile_values[:,:,5])),
+    #                     0., 1.)
+    # better, on the right track, but cut some real stuff as well...
+    #bad_pix_mask = where(((percentile_values[:,:,5] - percentile_values[:,:,3]) > 
+    #                      3.0 - 0.5 * bestfit_values),
+    #                     0., 1.)
+    
         
-    savez(resultsdir + mergefile,
+    savez(mergefile,
           bestfit_values = bestfit_values,
           percentile_values = percentile_values,
           quality_values = quality_values,
+          bad_pix_mask = bad_pix_mask,
+          bestfit_values_clean = bestfit_values_clean,
           ra_bins = ra_global,
           dec_bins = dec_global,
           savefilelist = savefilelist)
 
-    return bestfit_values, percentile_values, quality_values
+    plt.figure(6)
+    plt.clf()
+    plt.imshow(bestfit_values[::-1,::-1,1].T,vmin=0,vmax=4,cmap='hot')
+
+    plt.figure(7)
+    plt.clf()
+    im = plt.imshow(bestfit_values_clean[::-1,::-1,1].T,vmin=0,vmax=4,cmap='hot')
+    plt.colorbar(im)
+    
+    plt.figure(8)
+    plt.clf()
+    im = plt.imshow(bestfit_values_clean[::-1,::-1,0].T,vmin=0,vmax=4,cmap='seismic')
+    plt.colorbar(im)
+
+    plot_bestfit_results(results_file = mergefile, brickname=mergefileroot, pngroot=pngfileroot)
+
+    return bestfit_values, percentile_values, quality_values, bad_pix_mask, bestfit_values_clean
 
 
 def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
@@ -1590,13 +1651,13 @@ def find_peak_skew_normal(mean=0., stddev=1.):
 
 ############# CODE FOR RUNNING EMCEE AND PLOTTING RESULTS ###################
 
-def ln_priors(p):
+def ln_priors(p, return_prior_parameters=False):
     
     # set up ranges
 
     p0 = [-2.5, 2.5]           # x = ln(f/(1-f)) where fracred -- red fraction
     #p0 = [0.05, 0.95]         # fracred -- red fraction
-    p1 = [0.0001, 6.0]         # median A_V
+    p1 = [0.0001, 8.0]         # median A_V
     p2 = [0.01, 3.0]           # sigma_A/A_V (lognormal stddev / median)
                               
     # set up gaussians
@@ -1607,7 +1668,7 @@ def ln_priors(p):
     #p0mean = 0.5              # f=0.5 when not much other information
     #p0stddev = 0.25
 
-    AV_pix = deltapix_approx[0] / Acol_AV
+    #AV_pix = deltapix_approx[0] / Acol_AV
     #p1mean = 0.5 * AV_pix     # drive to low A_V if not much information
     #p1stddev = 8.0            #  ...but, keep it wide so little influence
 
@@ -1617,23 +1678,40 @@ def ln_priors(p):
     #p2mean = AV_pix              # sigma_A
     #p2stddev = p2[1] - p2mean
 
-    # return -Inf if the parameters are out of range
-    if ((p0[0] > p[0]) | (p[0] > p0[1]) | 
-        (p1[0] > p[1]) | (p[1] > p1[1]) | 
-        (p2[0] > p[2]) | (p[2] > p2[1])) :
-        return -Inf
+    # set up boundary on bad fits on sigma/A_V vs A_V plane
+    #bad_slope = -0.45
+    #bad_intercept = 0.45
 
-    # if all parameters are in range, return the ln of the Gaussian 
-    # (for a Gaussian prior)
-    lnp = 0.0000001
-    lnp += -0.5 * (p[0] - p0mean) ** 2 / p0stddev**2
-    #lnp += -0.5 * (p[1] - p1mean) ** 2 / p1stddev**2
-    lnp += -0.5 * (p[2] - p2mean) ** 2 / p2stddev**2
+    if return_prior_parameters:
 
-    #if (p0alpha != 0):  # add skewness to prior on x -- use if mean(f) != 0.5
-    #    lnp += log(2.0*norm.cdf(p0alpha * (p[0] - p0mean) / p0stddev))
+        return {'p0': p0, 'p1': p1, 'p2': p2, 
+                'p0mean': p0mean, 'p0stddev': p0stddev, 'p0alpha': p0alpha,
+                'p0mean': p2mean, 'p1stddev': p2stddev}
 
-    return lnp
+    else: 
+
+        # return -Inf if the parameters are out of range
+        #if ((p0[0] > p[0]) | (p[0] > p0[1]) | 
+        #    (p1[0] > p[1]) | (p[1] > p1[1]) | 
+        #    (p2[0] > p[2]) | (p[2] > p2[1]) |
+        #    (p[2] < bad_intercept + bad_slope * p[1])) :
+        #    return -Inf
+        if ((p0[0] > p[0]) | (p[0] > p0[1]) | 
+            (p1[0] > p[1]) | (p[1] > p1[1]) | 
+            (p2[0] > p[2]) | (p[2] > p2[1])):
+            return -Inf
+
+        # if all parameters are in range, return the ln of the Gaussian 
+        # (for a Gaussian prior)
+        lnp = 0.0000001
+        lnp += -0.5 * (p[0] - p0mean) ** 2 / p0stddev**2
+        #lnp += -0.5 * (p[1] - p1mean) ** 2 / p1stddev**2
+        lnp += -0.5 * (p[2] - p2mean) ** 2 / p2stddev**2
+
+        #if (p0alpha != 0):  # add skewness to prior on x -- use if mean(f) != 0.5
+        #    lnp += log(2.0*norm.cdf(p0alpha * (p[0] - p0mean) / p0stddev))
+
+        return lnp
 
     
 def ln_prob(param, i_star_color, i_star_magnitude):
@@ -1942,6 +2020,12 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
         
     # Uncertainty scatter plots, vs self on x-axis
 
+    # Uncertainty results
+
+    #sigf = (p[:,:,2] - p[:,:,0]) / 2.0
+    #sigA = (p[:,:,5] - p[:,:,3]) / 2.0
+    #sigw = (p[:,:,8] - p[:,:,6]) / 2.0
+
     plt.figure(4)
     plt.close()
     fig4 = plt.figure(4, figsize=(10,7))
@@ -1949,8 +2033,9 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
     plt.suptitle(brickname)
 
     plt.subplot(2,2,1)
+    #im = plt.scatter(bf[:,::-1,1], sigA / bf[:,::-1,1], c=bf[:,::-1,0],
     im = plt.scatter(bf[:,:,1], sigA / bf[:,:,1], c=bf[:,:,0],
-                     s=7, linewidth=0,
+                         s=7, linewidth=0,
                      alpha=0.4, vmin=0, vmax=1)
     plt.colorbar(im)
     plt.xlabel('$A_V$')
@@ -2075,8 +2160,15 @@ def show_model_examples():
     plt.draw()
 
 #  set up to allow calls from the shell with arguments
-#import sys
-#
-#if __name__ == '__main__':
-#  datafile = sys.argv[1]
-#  bfarray, percarray = run_one_brick(datafile, datadir='/mnt/angst4/dstn/v8/', showplot='')
+import sys
+
+if __name__ == '__main__':
+  datafile = sys.argv[1]
+  deltapixorig = [float(sys.argv[2]), float(sys.argv[3])]
+  d_arcsec = float(sys.argv[4])
+  results_extension=sys.argv[5]
+  print 'Datafile: ', datafile
+  print 'deltapixorig: ', deltapixorig
+  print 'd_arcsec: ', d_arcsec
+  print 'results_extension', results_extension
+  bfarray, percarray = run_one_brick(datafile, deltapixorig=deltapixorig, d_arcsec=d_arcsec, results_extension=results_extension, datadir='/mnt/angst4/dstn/v8/', showplot='')
