@@ -100,6 +100,7 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
         for (x,y), value in np.ndenumerate(cm): 
             if ((cstd[x,y] < cstdthreshvec[j]) & (cm[x,y] > cmnodataval) &
                 (rvec[j] <= rarray[x,y]) & (rarray[x,y] < rvec[j+1])) :
+
                 ikeep_narrow.extend(indices[x,y])                         # add indices of stars in the bin
                 cstd_narrow.extend(cstd[x,y] + np.zeros(len(indices[x,y])))  # tag stars w/ local stddev
                 cm_narrow.extend(cm[x,y] + np.zeros(len(indices[x,y])))  # tag stars w/ local median color
