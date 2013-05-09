@@ -4,6 +4,10 @@ import scipy.stats as stats
 import scipy.integrate as integrate
 import scipy.interpolate as interp
 import matplotlib.pyplot as plt
+import read_brick_data as rbd
+import makefakecmd as mfc
+from scipy.ndimage import filters as filt
+from random import sample
 import ezfig  # morgan's plotting code
 
 def plot_f_red_theory():
@@ -399,5 +403,346 @@ def compare_results(resultsdir = '../Results/', makeplots=True, usefracstats=Fal
 
     return d_bad
 
+def reparse_data_file(datafile = 'ir-sf-b12-v8-st.fits', 
+                      resultsfile = 'ir-sf-b12-v8-st.dc0.02.dm02.da6.6.npz', 
+                      datadir='../../Data/', resultsdir='../Results/'):
+    """
+    Read extinction mapping results file, and data file it was generated from.
+    Recreate indices map for ra, dec bin used.
+    """
 
+    #  read original stellar data
+
+    m1, m2, ra, dec, nmatch, sharp1, sharp2, crowd1, crowd2, snr1, snr2  = rbd.read_mag_position_gst(datadir + datafile, return_nmatch=True, return_quality=True)
+    m = np.array(m2)
+    c = np.array(m1 - m2)
+    ra = np.array(ra)
+    dec = np.array(dec)
+    nmatch = np.array(nmatch)
+
+    # read extinction fitting results
+
+    dat = np.load(resultsdir + resultsfile)
+    ra_bins = dat['ra_bins']
+    dec_bins = dat['dec_bins']
+
+    f       = dat['bestfit_values'][:,:,0]
+    A_V     = dat['bestfit_values'][:,:,1]
+    sig_A_V = dat['bestfit_values'][:,:,2]
+
+    # split stellar data into ra-dec bins
+
+    indices, ra_bins, dec_bins = mfc.split_ra_dec(ra, dec, 
+                                                  ra_bins=ra_bins,
+                                                  dec_bins=dec_bins)
+
+    return m, c, ra, dec, nmatch, indices, ra_bins, dec_bins, f, A_V, sig_A_V, sharp1, sharp2, crowd1, crowd2, snr1, snr2
+
+def compare_overlaps(datafile = 'ir-sf-b12-v8-st.fits', 
+                     resultsfile = 'ir-sf-b12-v8-st.dc0.02.dm02.da6.6.npz', 
+                     datadir='../../Data/', resultsdir='../Results/'):
+
+    m, c, ra, dec, nmatch, indices, ra_bins, dec_bins, f, A_V, sig_A_V, \
+        sharp1, sharp2, crowd1, crowd2, snr1, snr2 = \
+        reparse_data_file(datafile, resultsfile, datadir, resultsdir)
+
+    rangevec = [max(dec_bins), min(dec_bins), max(ra_bins), min(ra_bins)]
+
+    # calculate mean number of matches per bin
+    n_per_bin = np.median([len(indices[x,y]) 
+                           for (x,y),v in np.ndenumerate(indices) 
+                           if (len(indices[x,y]) > 1)])
+    n_thresh = n_per_bin - 7*np.sqrt(n_per_bin)
+    
+    # initialize number of matches
+
+    n_matches = np.empty( indices.shape, dtype=float )
+    emptyval = -666
+    
+    for (i,j), value in np.ndenumerate(indices):
+        
+        if (len(indices[i,j]) > n_thresh):
+            
+            n_matches[i, j] = np.mean(nmatch[indices[i, j]])
+            
+        else:
+            
+            n_matches[i, j] = emptyval
+            
+    # evaluate likely bad fits
+            
+    datamask = np.where(A_V > 0, 1., 0.)
+    datamask_bool = np.where(A_V > 0, True, False)
+
+    A_V_smooth = filt.median_filter(A_V, size=(3))
+    A_V_deviance = A_V / A_V_smooth
+    A_V_offset = (A_V - A_V_smooth) / A_V_smooth
+    
+    # group CMDs in groups of bad deviance
+
+    i_good = []
+    i_bad_2 = []
+    i_bad_4 = []
+
+    for (i,j), value in np.ndenumerate(indices):
+     
+        # if there's data and A_V is low
+        if (A_V[i,j] > 0) & (A_V_smooth[i,j] < 0.2):
+
+            if (A_V_deviance[i,j] < 2): 
+                i_good.extend(indices[i,j])
+
+            if (A_V_deviance[i,j] > 2.5) & (A_V_deviance[i,j] < 4): 
+                i_bad_2.extend(indices[i,j])
+
+            if (A_V_deviance[i,j] >= 4): 
+                i_bad_4.extend(indices[i,j])
+
+    n_good = len(i_good)
+    n_bad_2 = len(i_bad_2)
+    n_bad_4 = len(i_bad_4)
+    print 'i_good: ', len(i_good)
+    print 'i_bad_2: ', len(i_bad_2)
+    print 'i_bad_4: ', len(i_bad_4)
+
+    # make density maps of cmds.
+    crange=[0.0, 3.] 
+    mrange=[24.5, 17.5]
+    nbins=[15,30]
+    h_good, xedges, yedges = np.histogram2d(m[i_good], c[i_good], normed=True,
+                                            range=[np.sort(mrange), crange], bins=nbins)
+    h_bad_2, xedges, yedges = np.histogram2d(m[i_bad_2], c[i_bad_2], normed=True,
+                                             range=[np.sort(mrange), crange], bins=nbins)
+    h_bad_4, xedges, yedges = np.histogram2d(m[i_bad_4], c[i_bad_4], normed=True,
+                                             range=[np.sort(mrange), crange], bins=nbins)
+    h_rat_2 = h_bad_2 / h_good
+    h_rat_4 = h_bad_4 / h_good
+    cmd_extent = [yedges[0], yedges[-1], xedges[-1], xedges[0]]
+
+    # plot stuff
+
+    plt.figure(1)
+    plt.clf()
+     
+    plt.subplot(2,2,1)
+    im = plt.imshow(n_matches, vmin=1, vmax=2.5, interpolation='nearest', 
+               aspect = 'auto', extent=rangevec)
+    plt.colorbar(im)
+    plt.title('Number of Matches')
+
+    plt.subplot(2,2,2)
+    im = plt.imshow(A_V_deviance, vmin=0, vmax=10, interpolation='nearest', 
+               aspect = 'auto', extent=rangevec)
+    plt.colorbar(im)
+    plt.title('$A_V$ / $A_{V,smooth}$')
+    
+    plt.subplot(2,2,3)
+    im = plt.imshow(A_V_offset, vmin=-0.5, vmax=0.5, interpolation='nearest', 
+               aspect = 'auto', extent=rangevec)
+    plt.colorbar(im)
+    plt.title('$A_V$ - $A_{V,smooth}$')
+    
+    plt.subplot(2,2,4)
+    im = plt.imshow(A_V, vmin=0, vmax=4, interpolation='nearest', 
+               aspect = 'auto', extent=rangevec)
+    plt.colorbar(im)
+    plt.title('$A_V$')
+
+    plt.figure(2)
+    plt.clf()
+
+    plt.subplot(2,2,1)
+    plt.plot(n_matches, A_V_deviance, ',', alpha=0.05, color='b')
+    plt.axis([0.5, 2, 0, 10])
+    plt.xlabel('Average Number of Matches')
+    plt.ylabel('$A_V$ / $A_{V,smooth}$')
+    
+    plt.subplot(2,2,2)
+    plt.plot(n_matches, A_V_offset, ',', alpha=0.05, color='b')
+    plt.axis([0.5, 2, -2, 2])
+    plt.xlabel('Average Number of Matches')
+    plt.ylabel('$(A_V - A_{V,smooth}) / A_{V,smooth}$')
+    
+    plt.subplot(2,2,3)
+    plt.plot(A_V_smooth, A_V_deviance, ',', alpha=0.05, color='b')
+    plt.axis([0.0, 2, 0, 10])
+    plt.xlabel('$A_{V,smooth}$')
+    plt.ylabel('$A_V$ / $A_{V,smooth}$')
+    
+    plt.subplot(2,2,4)
+    plt.plot(A_V_smooth, A_V_offset, ',', alpha=0.05, color='b')
+    plt.axis([0.0, 2, -2, 2])
+    plt.xlabel('$A_{V,smooth}$')
+    plt.ylabel('$(A_V - A_{V,smooth}) / A_{V,smooth}$')
+    
+    # CMDs
+    plt.figure(3)
+    plt.clf()
+
+    alpha = 0.025
+    plt.subplot(2,2,1)
+    i_subsample = sample(i_good, n_bad_2)
+    plt.plot(c[i_subsample],m[i_subsample],',',alpha=alpha,color='b')
+    #plt.plot(c[i_good],m[i_good],',',alpha=alpha,color='b')
+    plt.axis([0, 3, 24.5, 17])
+
+    plt.subplot(2,2,3)
+    i_subsample = sample(i_good, n_bad_2)
+    plt.plot(c[i_good],m[i_good],',',alpha=0.1,color='b')
+    plt.axis([0, 3, 24.5, 17])
+
+    plt.subplot(2,2,2)
+    plt.plot(c[i_bad_2],m[i_bad_2],',',alpha=alpha,color='b')
+    plt.axis([0, 3, 24.5, 17])
+
+    plt.subplot(2,2,4)
+    plt.plot(c[i_bad_4],m[i_bad_4],',',alpha=alpha,color='b')
+    plt.axis([0, 3, 24.5, 17])
+
+    ####  CMD histograms
+    plt.figure(4)
+    plt.clf()
+    
+    plt.subplot(2,3,1)
+    plt.imshow(np.log(h_good),  extent=cmd_extent, origin='upper', aspect='auto', 
+               interpolation='nearest', vmin=-5, vmax=1)
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('F160W')
+    plt.title('$A_V$ / $A_{V,smooth}$ < 2')
+
+    plt.subplot(2,3,2)
+    plt.imshow(np.log(h_bad_2),  extent=cmd_extent, origin='upper', aspect='auto', 
+               interpolation='nearest', vmin=-5, vmax=1)
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('F160W')
+    plt.title('$2.5 < A_V$ / $A_{V,smooth} < 4$')
+
+    plt.subplot(2,3,3)
+    plt.imshow(np.log(h_bad_4),  extent=cmd_extent, origin='upper', aspect='auto', 
+               interpolation='nearest', vmin=-5, vmax=1)
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('F160W')
+    plt.title('$4 < A_V$ / $A_{V,smooth}$')
+
+    plt.subplot(2,3,5)
+    im = plt.imshow(h_rat_2,  extent=cmd_extent, origin='upper', aspect='auto', 
+               interpolation='nearest', vmin=0, vmax = 2.0, cmap='seismic')
+    plt.colorbar(im)
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('F160W')
+    plt.title('$(2.5 < A_V/A_{V,smooth} < 4)$ / $(A_V / A_{V,smooth} < 2)$')
+
+
+    plt.subplot(2,3,6)
+    im = plt.imshow(h_rat_4,  extent=cmd_extent, origin='upper', aspect='auto', 
+               interpolation='nearest', vmin=0, vmax = 2.0, cmap='seismic')
+    plt.colorbar(im)
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('F160W')
+    plt.title('$(4 < A_V/A_{V,smooth})$ / $(A_V / A_{V,smooth} < 2)$')
+    plt.draw()
+
+    ####  plot quality flags 
+    plt.figure(5)
+    plt.clf()
+
+    
+    # define outliers "o" and inliers 'i'
+    ig_o = np.array(i_good)[np.where((c[i_good] > 1) & (m[i_good] > 21.5))[0]]
+    ib2_o = np.array(i_bad_2)[np.where((c[i_bad_2] > 1) & (m[i_bad_2] > 21.5))[0]]
+    ib4_o = np.array(i_bad_4)[np.where((c[i_bad_4] > 1) & (m[i_bad_4] > 21.5))[0]]
+    ig_i = np.array(i_good)[np.where((c[i_good] < 1) & (m[i_good] > 21.5))[0]]
+    ib2_i = np.array(i_bad_2)[np.where((c[i_bad_2] < 1) & (m[i_bad_2] > 21.5))[0]]
+    ib4_i = np.array(i_bad_4)[np.where((c[i_bad_4] < 1) & (m[i_bad_4] > 21.5))[0]]
+    snr = np.sqrt(snr1**2 + snr2**2)
+    crowd = np.sqrt(crowd1**2 + crowd2**2)
+
+    plt.subplot(3,3,1)
+    plt.plot(sharp1[ib2_i],sharp2[ib2_i], ',', color='b', alpha=0.05)
+    plt.plot(sharp1[ib4_i],sharp2[ib4_i], ',', color='b', alpha=0.05)
+    plt.plot(sharp1[ib2_o],sharp2[ib2_o], ',', color='r')
+    plt.plot(sharp1[ib4_o],sharp2[ib4_o], ',', color='r')
+    plt.xlabel('Sharp 1')
+    plt.ylabel('Sharp 2')
+    
+    plt.subplot(3,3,2)
+    plt.plot(snr1[ib2_i],sharp1[ib2_i], ',', color='b', alpha=0.05)
+    plt.plot(snr1[ib4_i],sharp1[ib4_i], ',', color='b', alpha=0.05)
+    plt.plot(snr1[ib2_o],sharp1[ib2_o], ',', color='r')
+    plt.plot(snr1[ib4_o],sharp1[ib4_o], ',', color='r')
+    plt.xlabel('SNR 1')
+    plt.ylabel('Sharp 1')
+    
+    plt.subplot(3,3,3)
+    plt.plot(snr2[ib2_i], sharp2[ib2_i],',', color='b', alpha=0.05)
+    plt.plot(snr2[ib4_i], sharp2[ib4_i],',', color='b', alpha=0.05)
+    plt.plot(snr2[ib2_o], sharp2[ib2_o],',', color='r')
+    plt.plot(snr2[ib4_o], sharp2[ib4_o],',', color='r')
+    plt.xlabel('SNR 2')
+    plt.ylabel('Sharp 2')
+    
+    plt.subplot(3,3,4)
+    plt.plot(crowd1[ig_i],crowd2[ig_i], ',', color='b', alpha=0.05)
+    plt.plot(crowd1[ib2_i],crowd2[ib2_i], ',', color='b', alpha=0.05)
+    plt.plot(crowd1[ib4_i],crowd2[ib4_i], ',', color='b', alpha=0.05)
+    plt.plot(crowd1[ig_o],crowd2[ig_o], ',', color='r')
+    plt.plot(crowd1[ib2_o],crowd2[ib2_o], ',', color='r')
+    plt.plot(crowd1[ib4_o],crowd2[ib4_o], ',', color='r')
+    plt.axis([0, 2, 0, 2])
+    plt.xlabel('Crowd 1')
+    plt.ylabel('Crowd 2')
+    
+    plt.subplot(3,3,5)
+    plt.plot(sharp1[ib2_i],crowd[ib2_i], ',', color='b', alpha=0.05)
+    plt.plot(sharp1[ib4_i],crowd[ib4_i], ',', color='b', alpha=0.05)
+    plt.plot(sharp1[ib2_o],crowd[ib2_o], ',', color='r')
+    plt.plot(sharp1[ib4_o],crowd[ib4_o], ',', color='r')
+    plt.axis([-0.05, 0.3, 0, 2])
+    plt.xlabel('Sharp 1')
+    plt.ylabel('Crowd')
+    
+    plt.subplot(3,3,6)
+    plt.plot(snr1[ib2_i],crowd1[ib2_i], ',', color='b', alpha=0.05)
+    plt.plot(snr1[ib4_i],crowd1[ib4_i], ',', color='b', alpha=0.05)
+    plt.plot(snr1[ib2_o],crowd1[ib2_o], ',', color='r')
+    plt.plot(snr1[ib4_o],crowd1[ib4_o], ',', color='r')
+    plt.xlabel('SNR 1')
+    plt.ylabel('Crowd 1')
+    
+    plt.subplot(3,3,7)
+    plt.plot(sharp1[ib2_i],sharp1[ib2_i]-sharp2[ib2_i], ',', color='b', alpha=0.05)
+    plt.plot(sharp1[ib4_i],sharp1[ib4_i]-sharp2[ib4_i], ',', color='b', alpha=0.05)
+    plt.plot(sharp1[ib2_o],sharp1[ib2_o]-sharp2[ib2_o], ',', color='r')
+    plt.plot(sharp1[ib4_o],sharp1[ib4_o]-sharp2[ib4_o], ',', color='r')
+    plt.axis([-0.05, 0.3, -0.25, 0.3])
+    plt.xlabel('Sharp 1')
+    plt.ylabel('Sharp 1 - Sharp 2')
+    
+    plt.subplot(3,3,8)
+    plt.plot(sharp2[ig_i],sharp1[ig_i]-sharp2[ig_i], ',', color='b', alpha=0.05)
+    plt.plot(sharp2[ib2_i],sharp1[ib2_i]-sharp2[ib2_i], ',', color='b', alpha=0.05)
+    plt.plot(sharp2[ib4_i],sharp1[ib4_i]-sharp2[ib4_i], ',', color='b', alpha=0.05)
+    plt.plot(sharp2[ig_o],sharp1[ig_o]-sharp2[ig_o], ',', color='r')
+    plt.plot(sharp2[ib2_o],sharp1[ib2_o]-sharp2[ib2_o], ',', color='r')
+    plt.plot(sharp2[ib4_o],sharp1[ib4_o]-sharp2[ib4_o], ',', color='r')
+    plt.axis([-0.05, 0.3, -0.25, 0.1])
+    plt.xlabel('Sharp 2')
+    plt.ylabel('Sharp 1 - Sharp 2')
+    
+    plt.subplot(3,3,9)
+    plt.plot(crowd[ig_i],sharp1[ig_i]-sharp2[ig_i], ',', color='b', alpha=0.05)
+    plt.plot(crowd[ib2_i],sharp1[ib2_i]-sharp2[ib2_i], ',', color='b', alpha=0.05)
+    plt.plot(crowd[ib4_i],sharp1[ib4_i]-sharp2[ib4_i], ',', color='b', alpha=0.05)
+    plt.plot(crowd[ig_o],sharp1[ig_o]-sharp2[ig_o], ',', color='r')
+    plt.plot(crowd[ib2_o],sharp1[ib2_o]-sharp2[ib2_o], ',', color='r')
+    plt.plot(crowd[ib4_o],sharp1[ib4_o]-sharp2[ib4_o], ',', color='r')
+    plt.xlabel('Crowd')
+    plt.ylabel('Sharp 1 - Sharp 2')
+    plt.axis([0, 3, -0.25, 0.1])
+
+    
+    return i_good, i_bad_2, i_bad_4
+            
+
+     
 
