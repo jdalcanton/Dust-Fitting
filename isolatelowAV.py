@@ -169,7 +169,9 @@ def get_major_axis(ra, dec):
     m31pa  = pa * radeg
     incl   = incl * radeg
     b_over_a = math.cos(incl)
-    ecc = math.sqrt(1 - b_over_a)
+    ecc = math.sqrt(1. - (b_over_a)**2.)
+    #print 'B_over_A: ', b_over_a
+    #print 'Incl: ', incl
     
     raoff  = (ra  - m31ra) * math.cos(m31dec * radeg)
     decoff = (dec - m31dec)
@@ -177,8 +179,70 @@ def get_major_axis(ra, dec):
     #majdeg = raoff * np.sin(m31pa) + decoff * np.cos(m31pa)   
     r = np.sqrt((decoff * math.cos(m31pa) + raoff * math.sin(m31pa))**2 +
                 (decoff * math.sin(m31pa) - raoff * math.cos(m31pa))**2 / (1.0 - ecc**2))
+    r = np.sqrt((decoff * math.cos(m31pa) + raoff * math.sin(m31pa))**2 +
+                (decoff * math.sin(m31pa) - raoff * math.cos(m31pa))**2 / (1.0 - ecc**2))
     
     return r
+
+def test_major_axis(filename = '../Results/FirstRun/ir-sf-b02-v8-st.npz'):
+
+    d = np.load(filename)
+
+    ra_g = np.array(d['ra_global'])
+    dec_g = np.array(d['dec_global'])
+    ra_b = np.array(d['ra_bins'])
+    dec_b = np.array(d['dec_bins'])
+
+    rr_g, dd_g = np.meshgrid(ra_g, dec_g)
+    rangevec_g = [max(ra_g), min(ra_g), min(dec_g), max(dec_g)]
+    rr_b, dd_b = np.meshgrid(ra_b, dec_b)
+    rangevec_b = [max(ra_b), min(ra_b), min(dec_b), max(dec_b)]
+    r_brickcorner = [min(ra_b), min(ra_b), max(ra_b), max(ra_b), min(ra_b)]
+    d_brickcorner = [min(dec_b), max(dec_b), max(dec_b), min(dec_b), min(dec_b)]
+
+    r_g = get_major_axis(rr_g, dd_g)
+    r_b = get_major_axis(rr_b, dd_b)
+    
+    plt.figure(1)
+    plt.clf()
+
+    plt.subplot(1,3,1)
+    im = plt.imshow(rr_g[:,::-1], origin='lower', extent=rangevec_g, aspect='auto')
+    plt.colorbar(im)
+    plt.title('RA')
+    plt.suptitle(filename)
+
+    plt.subplot(1,3,2)
+    im = plt.imshow(dd_g[:,::-1], origin='lower', extent=rangevec_g, aspect='auto')
+    plt.colorbar(im)
+    plt.title('Dec')
+
+    plt.subplot(1,3,3)
+    im = plt.imshow(r_g[:,::-1], origin='lower', extent=rangevec_g, aspect='auto')
+    plt.colorbar(im)
+    plt.title('Major Axis')
+    im = plt.plot(r_brickcorner, d_brickcorner, color='black')
+    
+    plt.figure(2)
+    plt.clf()
+
+    plt.subplot(3,1,1)
+    im = plt.imshow(rr_b[:,::-1], origin='lower', extent=rangevec_b, aspect='auto')
+    plt.colorbar(im)
+    plt.title('RA')
+    plt.suptitle(filename)
+
+    plt.subplot(3,1,2)
+    im = plt.imshow(dd_b[:,::-1], origin='lower', extent=rangevec_b, aspect='auto')
+    plt.colorbar(im)
+    plt.title('Dec')
+
+    plt.subplot(3,1,3)
+    im = plt.imshow(r_b[:,::-1], origin='lower', extent=rangevec_b, aspect='auto')
+    plt.colorbar(im)
+    plt.title('Major Axis')
+
+    return
 
 def make_all_isolate_AV():
 

@@ -1,3 +1,5 @@
+# f = pyfits.PrimaryHDU(data = array); f.writeto('blah.fits').  It'll generate a header for you.
+
 ## to deal with display when running as background jobs
 from matplotlib import use
 use('Agg')
@@ -1028,7 +1030,6 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
 
     # Calculate reddening-free magnitude
 
-    #q = m + (c-reference_color)*sin(t)/cos(t)
     q = m - (c-reference_color)*(Amag_AV / Acol_AV)
 
     # Initialize unreddened CMDs and noise models
