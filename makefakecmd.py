@@ -995,6 +995,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
 
     r_array = iAV.get_major_axis(ra_cen_array, dec_cen_array)
     r_range = [nanmin(r_array), nanmax(r_array)]
+    print 'Radial Fitting Range: ', r_range
 
     # Get range of magnitude limits to set CMD limits appropriately.
     # (i.e., tighten in to speed computation)
@@ -1057,7 +1058,10 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     # i.e., for r_interval[i] < r < r_interval[i+1], use foreground_cmd_array[i].
 
     r_intervals = array([(meanr_vec[i] + meanr_vec[i+1])/2.0 for i in range(len(meanr_vec)-1)])
-    r_intervals = append([0], r_intervals, nanmax(rrange_array))
+    max_rrange = nanmax(rrange_array)
+    max_brickr = nanmax(r_range_limit)
+    max_r = maximum(max_rrange, max_brickr)
+    r_intervals = append([0], r_intervals, max_r)
 
     # bin data into ra-dec
 

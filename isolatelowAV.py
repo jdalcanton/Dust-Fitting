@@ -278,12 +278,9 @@ def make_all_isolate_AV():
     cm_narrow = []
 
     # set up parameter values
-    f = 0.05
     mr = [19.0, 22.0]
-    nb = 5
-
-    f = 0.1
-    nb = 10
+    f = 0.2
+    nb = 20
 
     for filename in filelist:
 
@@ -374,10 +371,11 @@ def make_all_isolate_AV_for_noise_model():
     cm_narrow = []
 
     # set up parameter values
-    f = 0.075
-    mr = [18.75, 19.75]
-    nb = 5
     d_arcsec = 20.
+    mr = [18.75, 19.75]
+
+    f = 0.15
+    nb = 7
 
     for filename in filelist:
 
@@ -434,12 +432,13 @@ def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
 
     resultsdir = '../Unreddened/'
     fileroot = resultsdir + 'allbricks'
-    if makenoise:
-        fileroot = resultsdir + 'allbricks.noise'
     savefilename = fileroot + '.npz'
-
     dat = np.load(savefilename)
     
+    if makenoise:
+        fileroot = resultsdir + 'allbricks.noise'
+        savefilename = fileroot + '.npz'
+
     r = dat['rnarrow']
     cstd = dat['cstd_narrow']
     cm = dat['cm_narrow']
@@ -447,25 +446,39 @@ def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
     plt.figure(1)
     plt.clf()
     plt.plot(r, cstd, ',', color='black', alpha=0.5)
-    plt.axis([0, 1.35, 0, 0.15])
+    plt.axis([0, 1.55, 0, 0.15])
     plt.xlabel('Major Axis Length (degrees)')
     plt.ylabel('RGB width')
 
     # do a first cull on obvious bad regions
 
-    i_bad = np.where(((r>0.58) & (r <1.2) & (cstd > 0.052)) | 
-                     ((r > 1.05) & (r < 1.25)) |
-                     (r < 0.03) |
-                     ((r > 0.39) & (r < 0.44) & (cstd > 0.075)) |
-                     ((r > 0.44) & (r < 0.6) & (cstd > 0.055)) |
-                     ((r > 1.23) & (cstd > 0.035)) |
-                     ((r > 0.32) & (r < 0.39)), 1, 0)
-    i_bad_noise = np.where(((r>0.58) & (r <1.2) & (cstd > 0.03)) | 
-                           ((r > 1.09) & (r < 1.2) & (cstd > 0.0225)) |
-                           (r < 0.03) |
-                           ((r > 0.39) & (r < 0.44) & (cstd > 0.0425)) |
-                           ((r > 0.44) & (r < 0.6) & (cstd > 0.035)) |
+    #i_bad = np.where(((r>0.58) & (r <1.2) & (cstd > 0.052)) | 
+    #                 ((r > 1.05) & (r < 1.25)) |
+    #                 (r < 0.05) |
+    #                 ((r > 0.39) & (r < 0.44) & (cstd > 0.075)) |
+    #                 ((r > 0.44) & (r < 0.6) & (cstd > 0.055)) |
+    #                 ((r > 1.23) & (cstd > 0.035)) |
+    #                 ((r > 0.32) & (r < 0.39)), 1, 0)
+    #i_bad_noise = np.where(((r>0.58) & (r <1.2) & (cstd > 0.03)) | 
+    #                       ((r > 1.09) & (r < 1.2) & (cstd > 0.0225)) |
+    #                       (r < 0.05) |
+    #                       ((r > 0.39) & (r < 0.44) & (cstd > 0.0425)) |
+    #                       ((r > 0.44) & (r < 0.6) & (cstd > 0.035)) |
+    #                       ((r > 0.32) & (r < 0.39)), 1, 0)
+    i_bad = np.where(((r>0.6) & (r <1.2) & (cstd > 0.07)) | 
+                     ((r > 1.1) & (r < 1.23)) |
+                     ((r > 0.95) & (r < 1.03)) |
+                     ((r > 0.6) & (r < 0.65)) |
+                     (r < 0.05) |
+                     ((r > 0.41) & (r < 0.61) & (cstd > 0.085)) |
+                     ((r > 1.15) & (cstd > 0.05)) |
+                     ((r > 0.6) & (r < 0.7) & (cstd > 0.065)), 1, 0)
+    i_bad_noise = np.where(((r>0.7) & (r <1.1) & (cstd > 0.07)) | 
+                           ((r > 0.9) & (r < 1.3) & (cstd > 0.05)) |
+                           (r < 0.05) |
+                           ((r > 0.47) & (r < 0.65) & (cstd > 0.08)) |
                            ((r > 0.32) & (r < 0.39)), 1, 0)
+    i_bad_noise = i_bad
     if makenoise:
         i_good = np.where(i_bad_noise == 0)
     else:
@@ -510,7 +523,7 @@ def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
     plt.figure(2)
     plt.clf()
     plt.plot(r, cm, ',', color='black', alpha=0.5)
-    plt.axis([0, 1.35, -0.07, 0.07])
+    plt.axis([0, 1.55, -0.07, 0.07])
     plt.plot(r[ikeep], cm[ikeep], ',', color='magenta', alpha=0.5)
     plt.plot(rp, p_cm(rp), color='blue', linewidth=3)
     plt.xlabel('Major Axis Length (degrees)')
