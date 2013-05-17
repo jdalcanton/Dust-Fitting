@@ -1,4 +1,3 @@
-# f = pyfits.PrimaryHDU(data = array); f.writeto('blah.fits').  It'll generate a header for you.
 
 ## to deal with display when running as background jobs
 from matplotlib import use

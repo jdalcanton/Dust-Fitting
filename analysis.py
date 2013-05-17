@@ -9,6 +9,8 @@ import makefakecmd as mfc
 from scipy.ndimage import filters as filt
 from random import sample
 import ezfig  # morgan's plotting code
+import pyfits as pyfits
+import pywcs as pywcs
 
 def plot_f_red_theory():
 
@@ -743,6 +745,277 @@ def compare_overlaps(datafile = 'ir-sf-b12-v8-st.fits',
     
     return i_good, i_bad_2, i_bad_4
             
+# currently does not produce correct results!
+def make_fits_image(fitsfilename, array, rabins, decbins):
 
-     
+    f = pyfits.PrimaryHDU(data = array.T)
+    hdr = f.header
+    print 'Array: ', array.shape
+    print 'RAbins, Decbins: ', rabins.shape, decbins.shape
+    print 'NAXIS1, NAXIS2: ', hdr['NAXIS1'], hdr['NAXIS2']
 
+    # default M31 parameters (from generate_global_ra_dec_grid)
+    m31ra  = 10.6847929
+    m31dec = 41.2690650    # use as tangent point
+
+    # delta-degrees
+    dra = (rabins[1] - rabins[0]) * np.cos(np.math.pi * m31dec / 180.0)
+    ddec = decbins[1] - decbins[0]
+
+    # reference pixel
+    x0 = 0
+    y0 = 0
+    
+    # position of pixel centers
+    racenvec  = (rabins[0:-2]  +  rabins[1:-1]) / 2.0
+    deccenvec = (decbins[0:-2] + decbins[1:-1]) / 2.0
+
+    # interpolate to find pixel location of tangent point
+    #    issues: FITS: pixels start at 1  (but correction applied to transpose?)
+    #    not sure if ref pix number is for center of pixel or corner.
+    i_ra = np.arange(0.,len(racenvec))
+    i_dec = np.arange(0.,len(deccenvec))
+    x0 = np.interp(m31ra, racenvec, i_ra) + 1
+    y0 = np.interp(m31dec, deccenvec, i_dec) + 1
+    ra0 = m31ra
+    dec0 = m31dec
+
+    print 'Reference RA, Dec: ', ra0, dec0
+    print 'Reference X, Y:    ', x0, y0
+    print 'dRA, dDec:         ', dra, ddec
+
+    #hdr.update('CTYPE1', 'RA---CAR')
+    #hdr.update('CTYPE2', 'DEC--CAR')
+    hdr.update('CTYPE1', 'RA---TAN')
+    hdr.update('CTYPE2', 'DEC--TAN')
+    hdr.update('CRPIX1', x0,   'x reference pixel')
+    hdr.update('CRPIX2', y0,   'y reference pixel')
+    hdr.update('CRVAL1', ra0,  'RA  for first pixel')
+    hdr.update('CRVAL2', dec0, 'Dec for first pixel')
+    hdr.update('CD1_1',  dra,  'd(RA*cos(Dec))/dx')
+    hdr.update('CD1_2',  0,   'd(RA*cos(Dec))/dy')
+    hdr.update('CD2_1',  0,    'd(Dec)/dx')
+    hdr.update('CD2_2',  ddec, 'd(Dec)/dy')
+    #hdr.update('RA_TAN', m31ra, 'Tangent Point')
+    #hdr.update('DEC_TAN', m31dec, 'Tangent Point')
+    
+    pyfits.writeto(fitsfilename, array.T, header=hdr)
+
+    return
+
+# read in image, and match resolution & astrometry of extinction map to it
+def compare_img_to_AV(imgfile, resolution_in_arcsec='', 
+                      crop='True', outputAVfile=''):
+
+    f = pyfits.open(imgfile)
+    hdr, img = f[0].header, f[0].data
+    wcs = pywcs.WCS(hdr)
+
+    # make grid of RA and Dec at each pixel
+    i_ra, i_dec = np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]))
+    i_coords = np.array([[i_ra[i,j],i_dec[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
+
+    #i_coords = np.array([[i_ra[20,30], i_dec[20,30]]])
+
+    # solve for RA, dec at those coords
+    img_coords = wcs.wcs_pix2sky(i_coords, 1)
+    img_coords = np.reshape(img_coords,(i_ra.shape[0],i_ra.shape[1],2))
+    ra_img  = img_coords[:,:,0]
+    dec_img = img_coords[:,:,1]
+
+    # read A_V data
+
+    print 'Reading merged AV file.'
+    avdat = np.load('../Results/FirstRun/merged.npz')
+    AV = avdat['bestfit_values_clean'][:,:,1]
+    ra_bins = avdat['ra_bins']
+    dec_bins = avdat['dec_bins']
+    racenvec  = (ra_bins[0:-2]  +  ra_bins[1:-1]) / 2.0
+    deccenvec = (dec_bins[0:-2] + dec_bins[1:-1]) / 2.0
+    ra_AV, dec_AV = np.meshgrid(racenvec, deccenvec)
+
+    # smooth to match resolution of image
+
+    m31ra  = 10.6847929
+    m31dec = 41.2690650    # use as tangent point
+    dra = (ra_bins[1] - ra_bins[0]) * np.cos(np.math.pi * m31dec / 180.0)
+    ddec = dec_bins[1] - dec_bins[0]
+    pixscale = 3600.0 * (dra + ddec) / 2.0
+
+    if (resolution_in_arcsec != ''): 
+        smootharcsec = np.sqrt(resolution_in_arcsec**2 - pixscale**2)
+        smoothpix = smootharcsec / pixscale
+        print 'Smoothing to ',resolution_in_arcsec,' using ',smoothpix,' pixel wide filter'
+
+        AVsmooth = filt.gaussian_filter(AV, smoothpix, mode='reflect')
+    else:
+        AVsmooth = AV
+
+    # interpolate ra on ra_bins and dec on dec_bins to get coordinates in AV image
+    # grab nearest pixel in A_V image (possible off-by-one?) and copy into copy of img
+
+    print 'Interpolating to match image'
+    i_ra_AV = np.arange(0.,len(ra_bins)-2)
+    i_dec_AV = np.arange(0.,len(dec_bins)-2)
+    x_AV = np.reshape(np.interp(ra_img.flatten(), ra_bins[1:-1], i_ra_AV,
+                                left=-1, right=-1), 
+                      ra_img.shape)
+    y_AV = np.reshape(np.interp(dec_img.flatten(), dec_bins[1:-1], i_dec_AV,
+                                left=-1, right=-1), 
+                      dec_img.shape)
+    # turn into int referencing appropriate bin
+    #x_AV = np.round(x_AV).astype(int)
+    #y_AV = np.round(y_AV).astype(int)
+    x_AV = np.round(x_AV+1).astype(int)  # why +1? seems to work best...
+    y_AV = np.round(y_AV+1).astype(int)
+
+    # substitute AV values into appropriate pixels, provided they're in range
+    # (probably a pythonic list comprehension way to do this...)
+    AV_img = -1.0 + 0.0*img
+    minx = 1e6
+    miny = 1e6
+    maxx = 0
+    maxy = 0
+    for (x,y),v in np.ndenumerate(AV_img):
+        if ((x_AV[x, y] > 0) & (y_AV[x, y] > 0)):
+            AV_img[x, y] = AVsmooth[x_AV[x,y], y_AV[x,y]]
+            if (minx > x): 
+                minx = x
+            if (miny > y): 
+                miny = y
+            if (maxx < x): 
+                maxx = x
+            if (maxy < y): 
+                maxy = y
+
+    # if requested, output AV_image
+    if (outputAVfile != ''):
+        print 'Writing output to ',outputAVfile
+        pyfits.writeto(outputAVfile, AV_img, hdr)
+
+    # if requested, crop to region where the AV map is valid
+    if (crop):
+        print 'Cropping to [',minx,':',maxx+1,',',miny,':',maxy+1,']'
+        img = img[minx:maxx+1,miny:maxy+1]
+        AV_img = AV_img[minx:maxx+1,miny:maxy+1]
+
+    # Consider installing pywcsgrid2...
+
+    # close file
+    f.close()
+
+    return wcs, img_coords, img, AV_img
+
+def compare_draine_dust():
+
+    drainfile = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.fits'
+    resolution = 10.0  # arcsec
+    #resolution = ''  # arcsec
+    outputfile = '../Results/FirstRun/draine_matched_AV.fits'
+
+    wcs, im_coords, img, AV_img = compare_img_to_AV(drainfile, crop='True',
+                                              resolution_in_arcsec=resolution, 
+                                                    outputAVfile='')
+    mask = np.where(AV_img > 0, 1.0, 0.0)
+    lowAVmask = np.where(AV_img > 0.3, 1.0, 0.0)
+    rat = AV_img/(img/1.e7)
+    medrat = np.median(rat[np.where(AV_img > 0.75)])
+
+    plt.figure(1)
+    plt.clf()
+    
+    plt.subplot(1,3,1)
+    im = plt.imshow(img/1.e7, interpolation='nearest',aspect='auto', 
+               origin='lower', vmin=-0.005, vmax=0.15)
+    plt.title('Dust Mass')
+
+    plt.subplot(1,3,2)
+    plt.imshow(AV_img, interpolation='nearest',aspect='auto', origin='lower',
+               vmin=0,vmax=4)
+    plt.title('$A_V$')
+
+    plt.subplot(1,3,3)
+    im = plt.imshow(lowAVmask*(rat - medrat), cmap='seismic',
+                    interpolation='nearest', aspect='auto', 
+                    origin='lower', vmin=-25,vmax=25)
+    plt.colorbar(im)
+    plt.title('$A_V$ / Dust Mass')
+
+    # brick 15 zoom
+    plt.figure(2)
+    plt.clf()
+
+    x0, x1, y0, y1 = 150, 235, 260, 310
+    plt.subplot(3,1,1)
+    im = plt.imshow(mask[y0:y1,x0:x1]*img[y0:y1,x0:x1]/1.e7, 
+                    interpolation='nearest',aspect='auto', 
+                    origin='lower', vmin=-0.005, vmax=0.13)
+    plt.title('Dust Mass')
+
+    plt.subplot(3,1,2)
+    plt.imshow(AV_img[y0:y1,x0:x1], interpolation='nearest',aspect='auto', origin='lower',
+               vmin=0,vmax=4)
+    plt.title('$A_V$')
+
+    plt.subplot(3,1,3)
+    plt.imshow(lowAVmask[y0:y1,x0:x1]*(rat[y0:y1,x0:x1]-medrat), cmap='seismic',
+               interpolation='nearest', aspect='auto', 
+               origin='lower', vmin=-25,vmax=25)
+    plt.title('$A_V$ / Dust Mass')
+
+    # correlation as points
+    #plt.figure(3)
+    #plt.close()
+
+    #plt.subplot(1,2,1)
+    #plt.plot(AV_img, (img/1.e7), ',', alpha=0.1, color='b')
+    #plt.xlabel('$A_V$')
+    #plt.ylabel('Dust Mass')
+    #plt.axis([0.0, 4.0, -0.005, 0.175])
+
+    #plt.subplot(1,2,2)
+    #plt.plot(AV_img, AV_img/(img/1.e7), ',', alpha=0.1, color='b')
+    #plt.xlabel('$A_V$')
+    #plt.ylabel('$A_V$ / Dust Mass')
+    #plt.axis([0.0, 4.0, 0.0, 75])
+
+    # correlation as density maps
+    plt.figure(4)
+    plt.clf()
+
+    AVmin, AVmax = 0.0001, 4.0
+    imgmin, imgmax = 0.0, 0.175
+    ratmin, ratmax = 0.0, 75.
+    nbins = 100
+    
+    AVbins = np.linspace(AVmin, AVmax, num=nbins)
+    imgbins = np.linspace(imgmin, imgmax, num=nbins)
+    ratbins = np.linspace(ratmin, ratmax, num=nbins)
+
+    h_AV_img, AVedges, imgedges = np.histogram2d(img.flatten()/1.e7, AV_img.flatten(), 
+                                                 range=[[imgmin, imgmax],
+                                                        [AVmin,AVmax]], 
+                                                 bins=nbins)
+    extent_AV_img = [AVmin, AVmax, imgmin, imgmax]
+
+    h_AV_AVoverimg, AVedges, imgedges = np.histogram2d((AV_img/(img/1.e7)).flatten(), 
+                                                        AV_img.flatten(), 
+                                                 range=[[ratmin, ratmax],
+                                                        [AVmin,AVmax]], 
+                                                 bins=nbins)
+    extent_AV_AVoverimg = [AVmin, AVmax, ratmin, ratmax]
+
+
+    plt.subplot(1,2,1)
+    plt.imshow((h_AV_img), extent=extent_AV_img, 
+               origin='lower', aspect='auto')
+    plt.xlabel('$A_V$')
+    plt.ylabel('Dust Mass')
+
+    plt.subplot(1,2,2)
+    plt.imshow((h_AV_AVoverimg), extent=extent_AV_AVoverimg, 
+               origin='lower', aspect='auto')
+    plt.xlabel('$A_V$')
+    plt.ylabel('$A_V$ / Dust Mass')
+
+    return
