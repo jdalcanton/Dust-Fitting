@@ -1,4 +1,3 @@
-
 ## to deal with display when running as background jobs
 from matplotlib import use
 use('Agg')
@@ -144,7 +143,7 @@ def median_rgb_color_map(indices,c,m,mrange=[18.8,22.5],crange=[0.3,2.5],
     mrange = restrict to range of magnitudes
     rgbparam = 2nd order polynomial of RGB location [magref, a0, a1, a2]
 
-    cmap, cmapgoodvals, cstdmap, cstdmapgoodvals = 
+    cmap, cmapgoodvals, cstdmap, cstdmapgoodvals, cmean, cmeanlist = 
                   median_rgb_color_map(indices,c,m,mrange=[19,21.5])
 
     to display:
@@ -163,6 +162,7 @@ def median_rgb_color_map(indices,c,m,mrange=[18.8,22.5],crange=[0.3,2.5],
 
     emptyval = -1
     cmap    = empty( indices.shape, dtype=float )
+    cmeanmap    = empty( indices.shape, dtype=float )
     cstdmap = empty( indices.shape, dtype=float )
 
     # calculate median number of stars per bin, to set threshold for
@@ -185,6 +185,10 @@ def median_rgb_color_map(indices,c,m,mrange=[18.8,22.5],crange=[0.3,2.5],
                                                (mtmp<mrange[1]) & 
                                                (ctmp > crange[0]) & 
                                                (ctmp<crange[1])).flat))
+            cmeanmap[i,j] = mean(dctmp.compress(((mtmp > mrange[0]) & 
+                                               (mtmp<mrange[1]) & 
+                                               (ctmp > crange[0]) & 
+                                               (ctmp<crange[1])).flat))
             cstdmap[i,j] = std(dctmp.compress(((mtmp > mrange[0]) & 
                                                (mtmp<mrange[1]) & 
                                                (ctmp > crange[0]) & 
@@ -192,6 +196,7 @@ def median_rgb_color_map(indices,c,m,mrange=[18.8,22.5],crange=[0.3,2.5],
         else:
 
             cmap[i,j] = emptyval
+            cmeanmap[i,j] = emptyval
             cstdmap[i,j] = emptyval
 
     # calculate list of good values
@@ -199,7 +204,7 @@ def median_rgb_color_map(indices,c,m,mrange=[18.8,22.5],crange=[0.3,2.5],
     igood = where(cmap > -1)
     print 'Median Color offset:', median(cmap[igood])
 
-    return cmap, cmap[igood], cstdmap, cstdmap[igood]
+    return cmap, cmap[igood], cstdmap, cstdmap[igood], cmean, cmeanmap[igood]
 
 
 def isolate_low_AV_color_mag(filename = '../../Data/12056_M31-B15-F09-IR_F110W_F160W.st.fits',
@@ -236,7 +241,7 @@ def isolate_low_AV_color_mag(filename = '../../Data/12056_M31-B15-F09-IR_F110W_F
 
     indices, rabins, decbins = split_ra_dec(ra, dec, d_arcsec)
 
-    cm,cmlist,cstd,cstdlist = median_rgb_color_map(indices, c, m,
+    cm,cmlist,cstd,cstdlist,cmean,cmeanlist = median_rgb_color_map(indices, c, m,
                                                    mrange, crange, rgbparam)
     print 'Number of valid areas in color map: ', len(cmlist)
 
@@ -482,7 +487,8 @@ def makefakecmd(fg_cmd, cvec, mvec, AVparam, floorfrac=0.0,
     medianAV = AVparam[1]
     stddev = AVparam[2] * medianAV
     #stddev = AVparam[2]
-    sigma = log((1. + sqrt(1. + 4. * (stddev/medianAV)**2)) / 2.)
+    sigma_squared = log((1. + sqrt(1. + 4. * (stddev/medianAV)**2)) / 2.)
+    sigma = sqrt(sigma_squared)
     Amag_AV = AVparam[3]
     Acol_AV = AVparam[4]
     
@@ -1047,7 +1053,8 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                                     deltapixorig = deltapixorig,
                                     mnormalizerange = [19,21.5], 
                                     maglimoff = maglimoff,
-                                    nsig_blue_color_cut = 2.0, blue_color_cut_mask_only=False,
+                                    nsig_blue_color_cut = 2.0, 
+                                    blue_color_cut_mask_only=False,
                                     usemask=True, masksig=masksig,
                                     makenoise=True, noisemasksig=noisemasksig,
                                     useq=True, reference_color=reference_color,
@@ -1290,150 +1297,6 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     return bestfit_values, percentile_values
 
 
-def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resultsdir='../Results/',
-                  mergefileroot='merged'):
-
-    savefilelist = ['ir-sf-b02-v8-st.npz', 'ir-sf-b04-v8-st.npz', 'ir-sf-b05-v8-st.npz', 
-                    'ir-sf-b06-v8-st.npz', 'ir-sf-b08-v8-st.npz', 'ir-sf-b09-v8-st.npz', 
-                    'ir-sf-b12-v8-st.npz', 'ir-sf-b14-v8-st.npz', 'ir-sf-b15-v8-st.npz', 
-                    'ir-sf-b16-v8-st.npz', 'ir-sf-b17-v8-st.npz', 'ir-sf-b18-v8-st.npz', 
-                    'ir-sf-b19-v8-st.npz', 'ir-sf-b21-v8-st.npz', 'ir-sf-b22-v8-st.npz', 
-                    'ir-sf-b23-v8-st.npz']
-    mergefile = resultsdir + mergefileroot + '.npz'
-    pngfileroot = resultsdir + mergefileroot
-
-    # initialize ra-dec grid
-
-    dat = load(resultsdir + savefilelist[0])
-    ra_global = dat['ra_global'].flatten()
-    dec_global = dat['dec_global'].flatten()
-
-    nx = len(ra_global) - 1
-    ny = len(dec_global) - 1
-
-    print 'ddec: ', (dec_global[1]-dec_global[0])*3600.
-    print 'dra:  ', (ra_global[1]-ra_global[0])*3600.
-
-    nz_bestfit = 3
-    nz_sigma = nz_bestfit * 3
-    nz_quality = 2
-    bestfit_values = zeros([nx, ny, nz_bestfit])
-    percentile_values = zeros([nx, ny, nz_sigma])
-    quality_values = zeros([nx, ny, nz_quality])
-
-    # loop through list of files
-
-    for i, savefile in enumerate(savefilelist):
-
-        print 'Merging ', resultsdir + savefilelist[i]
-
-        dat = load(resultsdir + savefilelist[i])
-        bf = dat['bestfit_values']
-        p  = dat['percentile_values']
-        q  = dat['quality_values']
-        if (len(p.shape) == 4):
-            p = p[0,:,:,:]
-        if (len(q.shape) == 4):
-            q = q[0,:,:,:]
-        ra_g  = dat['ra_global'].flatten()
-        dec_g = dat['dec_global'].flatten()
-
-        try:
-            ra_local = dat['ra_local']
-            dec_local = dat['dec_local']
-        except:
-            ra_local = dat['ra_bins']         # to deal with old file that had different name...
-            dec_local = dat['dec_bins']
-
-        dat.close()
-
-        nx, ny = bf[:,:,0].shape
-
-        # verify that the global arrays equal the master
-
-        if (array_equal(ra_g, ra_global) & array_equal(dec_g, dec_global)):
-
-            # find starting location for copy
-            i_x0 = where(ra_local[0]  == ra_global)[0][0]
-            i_y0 = where(dec_local[0] == dec_global)[0][0]
-
-            # copy to the right location
-
-            #bestfit_values[i_x:i_x + nx, i_y:i_y + ny, :] = bf
-            #percentile_values[i_x:i_x + nx, i_y:i_y + ny, :] = p
-            #quality_values[i_x:i_x + nx, i_y:i_y + ny, :] = q
-            
-            # don't copy -666, and check that nstars in quality values is higher than existing one 
-            # (i.e., for overlaps).
-
-            for i_x in range(len(bf[:,0,0])):
-
-                for i_y in range(len(bf[0,:,0])):
-
-                    if (quality_values[i_x0 + i_x, i_y0 + i_y, 1] < q[i_x, i_y, 1]):
-
-                        bestfit_values[   i_x0 + i_x, i_y0 + i_y, :] = bf[i_x, i_y, :]
-                        percentile_values[i_x0 + i_x, i_y0 + i_y, :] = p[i_x, i_y, :]
-                        quality_values[   i_x0 + i_x, i_y0 + i_y, :] = q[i_x, i_y, :]
-        
-        else:
-
-            print 'Global ra and dec do not agree for ', resultsdir + savefilelist[i]
-
-    # make mask of likely bad fits
-    datamask = where(bestfit_values[:,:,1] > 0, 1., 0.)
-    datamask_bool = where(bestfit_values[:,:,1] > 0, True, False)
-
-    likelihood_cut = -6.4
-    median_filt_cut = 7
-    bf_smooth = filt.median_filter(bestfit_values, size=(3,3,1))
-    bad_pix_mask = where(bestfit_values[:,:,1] / bf_smooth[:,:,1] > median_filt_cut, 0., 1.)
-    bestfit_values_clean = bestfit_values.copy()
-    bestfit_values_clean[:,:,0] = bestfit_values[:,:,0] * bad_pix_mask + bf_smooth[:,:,0]*(1.-bad_pix_mask)
-    bestfit_values_clean[:,:,1] = bestfit_values[:,:,1] * bad_pix_mask + bf_smooth[:,:,1]*(1.-bad_pix_mask)
-    bestfit_values_clean[:,:,2] = bestfit_values[:,:,2] * bad_pix_mask + bf_smooth[:,:,2]*(1.-bad_pix_mask)
-    # helped a bit, but not much...
-    #bad_pix_mask = where((bestfit_values[:,:,2] < 0.45 - 0.45*bestfit_values[:,:,1]) |
-    #                     (quality_values[:,:,0] < likelihood_cut), 0., 1.)
-    # following cut out way too many stars
-    #bad_pix_mask = where(((bestfit_values[:,:,1] < percentile_values[:,:,3]) |
-    #                      (bestfit_values[:,:,1] > percentile_values[:,:,5])),
-    #                     0., 1.)
-    # better, on the right track, but cut some real stuff as well...
-    #bad_pix_mask = where(((percentile_values[:,:,5] - percentile_values[:,:,3]) > 
-    #                      3.0 - 0.5 * bestfit_values),
-    #                     0., 1.)
-    
-        
-    savez(mergefile,
-          bestfit_values = bestfit_values,
-          percentile_values = percentile_values,
-          quality_values = quality_values,
-          bad_pix_mask = bad_pix_mask,
-          bestfit_values_clean = bestfit_values_clean,
-          ra_bins = ra_global,
-          dec_bins = dec_global,
-          savefilelist = savefilelist)
-
-    plt.figure(6)
-    plt.clf()
-    plt.imshow(bestfit_values[::-1,::-1,1].T,vmin=0,vmax=4,cmap='hot')
-
-    plt.figure(7)
-    plt.clf()
-    im = plt.imshow(bestfit_values_clean[::-1,::-1,1].T,vmin=0,vmax=4,cmap='hot')
-    plt.colorbar(im)
-    
-    plt.figure(8)
-    plt.clf()
-    im = plt.imshow(bestfit_values_clean[::-1,::-1,0].T,vmin=0,vmax=4,cmap='seismic')
-    plt.colorbar(im)
-
-    plot_bestfit_results(results_file = mergefile, brickname=mergefileroot, pngroot=pngfileroot)
-
-    return bestfit_values, percentile_values, quality_values, bad_pix_mask, bestfit_values_clean
-
-
 def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
                        ra_bin_num='', dec_bin_num='',
                        nwalkers=50, nsamp=15, nburn=150,
@@ -1667,7 +1530,7 @@ def ln_priors(p, return_prior_parameters=False):
     # set up gaussians
     p0mean = 0.0              # symmetric in x means mean of f=0.5
     p0stddev = 1.0
-    p0stddev = 0.75
+    #p0stddev = 0.75
     p0alpha = 0.0             # for implementing skew normal prior....
     #p0mean = 0.5              # f=0.5 when not much other information
     #p0stddev = 0.25
@@ -1679,6 +1542,7 @@ def ln_priors(p, return_prior_parameters=False):
     p2mean = 1.0              # w = broad gaussian 
     #p2stddev = p2[1] - p2mean
     p2stddev = 0.5
+    p2stddev = 1.0
     #p2mean = AV_pix              # sigma_A
     #p2stddev = p2[1] - p2mean
 
@@ -1754,7 +1618,10 @@ def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2], likelihoodfunction='',
     pos, prob, state = sampler.run_mcmc(p0, nburn)
 
     # Correlation function values -- keep at least this many nsteps x 2
-    acor = sampler.acor
+    try:
+        acor = sampler.acor
+    except:
+        acor = -666.
 
     # run final...
     sampler.reset()
@@ -2165,7 +2032,7 @@ def show_model_examples():
 
 #  set up to allow calls from the shell with arguments
 import sys
-
+#
 if __name__ == '__main__':
   datafile = sys.argv[1]
   deltapixorig = [float(sys.argv[2]), float(sys.argv[3])]

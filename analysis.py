@@ -1,4 +1,5 @@
 import pylab
+import math
 import numpy as np
 import scipy.stats as stats
 import scipy.integrate as integrate
@@ -6,11 +7,156 @@ import scipy.interpolate as interp
 import matplotlib.pyplot as plt
 import read_brick_data as rbd
 import makefakecmd as mfc
+import isolatelowAV as iAV
 from scipy.ndimage import filters as filt
 from random import sample
 import ezfig  # morgan's plotting code
 import pyfits as pyfits
 import pywcs as pywcs
+import makefakecmd as mfc
+
+def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resultsdir='../Results/',
+                  mergefileroot='merged'):
+
+    savefilelist = ['ir-sf-b02-v8-st.npz', 'ir-sf-b04-v8-st.npz', 'ir-sf-b05-v8-st.npz', 
+                    'ir-sf-b06-v8-st.npz', 'ir-sf-b08-v8-st.npz', 'ir-sf-b09-v8-st.npz', 
+                    'ir-sf-b12-v8-st.npz', 'ir-sf-b14-v8-st.npz', 'ir-sf-b15-v8-st.npz', 
+                    'ir-sf-b16-v8-st.npz', 'ir-sf-b17-v8-st.npz', 'ir-sf-b18-v8-st.npz', 
+                    'ir-sf-b19-v8-st.npz', 'ir-sf-b21-v8-st.npz', 'ir-sf-b22-v8-st.npz', 
+                    'ir-sf-b23-v8-st.npz']
+    mergefile = resultsdir + mergefileroot + '.npz'
+    pngfileroot = resultsdir + mergefileroot
+
+    # initialize ra-dec grid
+
+    dat = np.load(resultsdir + savefilelist[0])
+    ra_global = dat['ra_global'].flatten()
+    dec_global = dat['dec_global'].flatten()
+
+    nx = len(ra_global) - 1
+    ny = len(dec_global) - 1
+
+    print 'ddec: ', (dec_global[1]-dec_global[0])*3600.
+    print 'dra:  ', (ra_global[1]-ra_global[0])*3600.
+
+    nz_bestfit = 3
+    nz_sigma = nz_bestfit * 3
+    nz_quality = 2
+    bestfit_values = np.zeros([nx, ny, nz_bestfit])
+    percentile_values = np.zeros([nx, ny, nz_sigma])
+    quality_values = np.zeros([nx, ny, nz_quality])
+
+    # loop through list of files
+
+    for i, savefile in enumerate(savefilelist):
+
+        print 'Merging ', resultsdir + savefilelist[i]
+
+        dat = np.load(resultsdir + savefilelist[i])
+        bf = dat['bestfit_values']
+        p  = dat['percentile_values']
+        q  = dat['quality_values']
+        if (len(p.shape) == 4):
+            p = p[0,:,:,:]
+        if (len(q.shape) == 4):
+            q = q[0,:,:,:]
+        ra_g  = dat['ra_global'].flatten()
+        dec_g = dat['dec_global'].flatten()
+
+        try:
+            ra_local = dat['ra_local']
+            dec_local = dat['dec_local']
+        except:
+            ra_local = dat['ra_bins']         # to deal with old file that had different name...
+            dec_local = dat['dec_bins']
+
+        dat.close()
+
+        nx, ny = bf[:,:,0].shape
+
+        # verify that the global arrays equal the master
+
+        if (np.array_equal(ra_g, ra_global) & np.array_equal(dec_g, dec_global)):
+
+            # find starting location for copy
+            i_x0 = np.where(ra_local[0]  == ra_global)[0][0]
+            i_y0 = np.where(dec_local[0] == dec_global)[0][0]
+
+            # copy to the right location
+
+            #bestfit_values[i_x:i_x + nx, i_y:i_y + ny, :] = bf
+            #percentile_values[i_x:i_x + nx, i_y:i_y + ny, :] = p
+            #quality_values[i_x:i_x + nx, i_y:i_y + ny, :] = q
+            
+            # don't copy -666, and check that nstars in quality values is higher than existing one 
+            # (i.e., for overlaps).
+
+            for i_x in range(len(bf[:,0,0])):
+
+                for i_y in range(len(bf[0,:,0])):
+
+                    if (quality_values[i_x0 + i_x, i_y0 + i_y, 1] < q[i_x, i_y, 1]):
+
+                        bestfit_values[   i_x0 + i_x, i_y0 + i_y, :] = bf[i_x, i_y, :]
+                        percentile_values[i_x0 + i_x, i_y0 + i_y, :] = p[i_x, i_y, :]
+                        quality_values[   i_x0 + i_x, i_y0 + i_y, :] = q[i_x, i_y, :]
+        
+        else:
+
+            print 'Global ra and dec do not agree for ', resultsdir + savefilelist[i]
+
+    # make mask of likely bad fits
+    datamask = np.where(bestfit_values[:,:,1] > 0, 1., 0.)
+    datamask_bool = np.where(bestfit_values[:,:,1] > 0, True, False)
+
+    likelihood_cut = -6.4
+    median_filt_cut = 7
+    bf_smooth = filt.median_filter(bestfit_values, size=(3,3,1))
+    bad_pix_mask = np.where(bestfit_values[:,:,1] / bf_smooth[:,:,1] > median_filt_cut, 0., 1.)
+    bestfit_values_clean = bestfit_values.copy()
+    bestfit_values_clean[:,:,0] = bestfit_values[:,:,0] * bad_pix_mask + bf_smooth[:,:,0]*(1.-bad_pix_mask)
+    bestfit_values_clean[:,:,1] = bestfit_values[:,:,1] * bad_pix_mask + bf_smooth[:,:,1]*(1.-bad_pix_mask)
+    bestfit_values_clean[:,:,2] = bestfit_values[:,:,2] * bad_pix_mask + bf_smooth[:,:,2]*(1.-bad_pix_mask)
+    # helped a bit, but not much...
+    #bad_pix_mask = np.where((bestfit_values[:,:,2] < 0.45 - 0.45*bestfit_values[:,:,1]) |
+    #                     (quality_values[:,:,0] < likelihood_cut), 0., 1.)
+    # following cut out way too many stars
+    #bad_pix_mask = np.where(((bestfit_values[:,:,1] < percentile_values[:,:,3]) |
+    #                      (bestfit_values[:,:,1] > percentile_values[:,:,5])),
+    #                     0., 1.)
+    # better, on the right track, but cut some real stuff as well...
+    #bad_pix_mask = np.where(((percentile_values[:,:,5] - percentile_values[:,:,3]) > 
+    #                      3.0 - 0.5 * bestfit_values),
+    #                     0., 1.)
+        
+    np.savez(mergefile,
+          bestfit_values = bestfit_values,
+          percentile_values = percentile_values,
+          quality_values = quality_values,
+          bad_pix_mask = bad_pix_mask,
+          bestfit_values_clean = bestfit_values_clean,
+          ra_bins = ra_global,
+          dec_bins = dec_global,
+          savefilelist = savefilelist)
+
+    plt.figure(6)
+    plt.clf()
+    plt.imshow(bestfit_values[::-1,::-1,1].T,vmin=0,vmax=4,cmap='hot')
+
+    plt.figure(7)
+    plt.clf()
+    im = plt.imshow(bestfit_values_clean[::-1,::-1,1].T,vmin=0,vmax=4,cmap='hot')
+    plt.colorbar(im)
+    
+    plt.figure(8)
+    plt.clf()
+    im = plt.imshow(bestfit_values_clean[::-1,::-1,0].T,vmin=0,vmax=1,cmap='seismic')
+    plt.colorbar(im)
+
+    mfc.plot_bestfit_results(results_file = mergefile, brickname=mergefileroot, pngroot=pngfileroot)
+
+    return bestfit_values, percentile_values, quality_values, bad_pix_mask, bestfit_values_clean
+
 
 def plot_f_red_theory():
 
@@ -744,15 +890,24 @@ def compare_overlaps(datafile = 'ir-sf-b12-v8-st.fits',
 
     
     return i_good, i_bad_2, i_bad_4
-            
-# currently does not produce correct results!
-def make_fits_image(fitsfilename, array, rabins, decbins):
+
+# not certain of astrometry currently
+# dat = np.load('../Results/merged.npz')
+# AV = dat['bestfit_values_clean'][:,:,1]
+# ra_bins = dat['ra_bins']
+# dec_bins = dat['dec_bins']
+
+def make_fits_image(fitsfilename, array, rabins, decbins, badval=-666, replaceval=0):
 
     f = pyfits.PrimaryHDU(data = array.T)
     hdr = f.header
     print 'Array: ', array.shape
     print 'RAbins, Decbins: ', rabins.shape, decbins.shape
     print 'NAXIS1, NAXIS2: ', hdr['NAXIS1'], hdr['NAXIS2']
+
+    # replace bad values, if requested
+    if (badval != ''):
+        array = np.where(array == badval, replaceval, array)
 
     # default M31 parameters (from generate_global_ra_dec_grid)
     m31ra  = 10.6847929
@@ -762,32 +917,44 @@ def make_fits_image(fitsfilename, array, rabins, decbins):
     dra = (rabins[1] - rabins[0]) * np.cos(np.math.pi * m31dec / 180.0)
     ddec = decbins[1] - decbins[0]
 
-    # reference pixel
-    x0 = 0
-    y0 = 0
-    
+    # middle of the image
+    m31ra_mid = (rabins[-1] + rabins[0]) / 2.0
+    m31dec_mid = (decbins[-1] + decbins[0]) / 2.0
+    m31ra = m31ra_mid
+    m31dec = m31dec_mid
+    dra = (rabins[1] - rabins[0]) * np.cos(np.math.pi * m31dec / 180.0)
+    ddec = decbins[1] - decbins[0]
+
     # position of pixel centers
     racenvec  = (rabins[0:-2]  +  rabins[1:-1]) / 2.0
     deccenvec = (decbins[0:-2] + decbins[1:-1]) / 2.0
 
+    ra0 = m31ra
+    dec0 = m31dec
+
     # interpolate to find pixel location of tangent point
     #    issues: FITS: pixels start at 1  (but correction applied to transpose?)
     #    not sure if ref pix number is for center of pixel or corner.
-    i_ra = np.arange(0.,len(racenvec))
-    i_dec = np.arange(0.,len(deccenvec))
-    x0 = np.interp(m31ra, racenvec, i_ra) + 1
-    y0 = np.interp(m31dec, deccenvec, i_dec) + 1
-    ra0 = m31ra
-    dec0 = m31dec
+    #
+    # if ra, dec at pixel corner
+    i_ra = np.arange(0.,len(rabins)).astype(float)
+    i_dec = np.arange(0.,len(decbins)).astype(float)
+    #x0 = np.interp(ra0, rabins, i_ra) + 1.0
+    #y0 = np.interp(dec0, decbins, i_dec) + 1.0
+    y0 = np.interp(ra0, rabins, i_ra) + 1.0
+    x0 = np.interp(dec0, decbins, i_dec) + 1.0
+    print 'Array dimension: ', array.shape
+    print 'Length in RA: ', rabins.shape
+    print 'Length in Dec: ', decbins.shape
 
     print 'Reference RA, Dec: ', ra0, dec0
     print 'Reference X, Y:    ', x0, y0
     print 'dRA, dDec:         ', dra, ddec
 
-    #hdr.update('CTYPE1', 'RA---CAR')
-    #hdr.update('CTYPE2', 'DEC--CAR')
-    hdr.update('CTYPE1', 'RA---TAN')
-    hdr.update('CTYPE2', 'DEC--TAN')
+    hdr.update('CTYPE1', 'RA---CAR')
+    hdr.update('CTYPE2', 'DEC--CAR')
+    #hdr.update('CTYPE1', 'RA---TAN')
+    #hdr.update('CTYPE2', 'DEC--TAN')
     hdr.update('CRPIX1', x0,   'x reference pixel')
     hdr.update('CRPIX2', y0,   'y reference pixel')
     hdr.update('CRVAL1', ra0,  'RA  for first pixel')
@@ -796,6 +963,14 @@ def make_fits_image(fitsfilename, array, rabins, decbins):
     hdr.update('CD1_2',  0,   'd(RA*cos(Dec))/dy')
     hdr.update('CD2_1',  0,    'd(Dec)/dx')
     hdr.update('CD2_2',  ddec, 'd(Dec)/dy')
+    #hdr.update('CD1_1',  0,  'd(RA*cos(Dec))/dx')
+    #hdr.update('CD1_2',  dra,   'd(RA*cos(Dec))/dy')
+    #hdr.update('CD2_1',  ddec,    'd(Dec)/dx')
+    #hdr.update('CD2_2',  0, 'd(Dec)/dy')
+    # to get Wells convention working...
+    #hdr.update('CDELT1', dra, 'd(RA*cos(Dec))/dx')
+    #hdr.update('CDELT2', ddec, 'd(Dec)/dy')
+    ############
     #hdr.update('RA_TAN', m31ra, 'Tangent Point')
     #hdr.update('DEC_TAN', m31dec, 'Tangent Point')
     
@@ -803,13 +978,32 @@ def make_fits_image(fitsfilename, array, rabins, decbins):
 
     return
 
+def make_radius_image(fitsfilename, rabins, decbins):
+
+    # position of pixel centers
+    racenvec  = (rabins[0:-2]  +  rabins[1:-1]) / 2.0
+    deccenvec = (decbins[0:-2] + decbins[1:-1]) / 2.0
+
+    ra, dec = np.meshgrid(racenvec, deccenvec)
+    r = iAV.get_major_axis(ra, dec)
+
+    make_fits_image(fitsfilename, r, rabins, decbins)
+    make_fits_image('ra_image.fits', ra, rabins, decbins)
+
+    return r, ra, dec
+    
+            
 # read in image, and match resolution & astrometry of extinction map to it
-def compare_img_to_AV(imgfile, resolution_in_arcsec='', 
-                      crop='True', outputAVfile=''):
+def compare_img_to_AV(imgfile, resolution_in_arcsec='', scaleimgfactor=1.0,
+                      crop='True', outputAVfile='', AVdatafile='../Results/merged.npz',
+                      usemeanAV=True):
 
     f = pyfits.open(imgfile)
     hdr, img = f[0].header, f[0].data
     wcs = pywcs.WCS(hdr)
+
+    # scale image by arbitrary factor to bring onto AV
+    img = img * scaleimgfactor
 
     # make grid of RA and Dec at each pixel
     i_ra, i_dec = np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]))
@@ -826,8 +1020,14 @@ def compare_img_to_AV(imgfile, resolution_in_arcsec='',
     # read A_V data
 
     print 'Reading merged AV file.'
-    avdat = np.load('../Results/FirstRun/merged.npz')
+    avdat = np.load(AVdatafile)
     AV = avdat['bestfit_values_clean'][:,:,1]
+    stddev_over_AV = avdat['bestfit_values_clean'][:,:,2]
+    if usemeanAV:
+        print 'Using Mean A_V, not median'
+        ###  NOTE!!! Incorrect -- compensates for error in runs 1-3!!!!
+        sig = np.log((1. + np.sqrt(1. + 4. * (stddev_over_AV)**2)) / 2.)
+        AV = AV * np.exp(sig**2 / 2.0)
     ra_bins = avdat['ra_bins']
     dec_bins = avdat['dec_bins']
     racenvec  = (ra_bins[0:-2]  +  ra_bins[1:-1]) / 2.0
@@ -836,8 +1036,14 @@ def compare_img_to_AV(imgfile, resolution_in_arcsec='',
 
     # smooth to match resolution of image
 
+    # center of bulge
     m31ra  = 10.6847929
-    m31dec = 41.2690650    # use as tangent point
+    m31dec = 41.2690650    
+    # use center of image as tangent point
+    m31ra_mid = (ra_bins[-1] + ra_bins[0]) / 2.0
+    m31dec_mid = (dec_bins[-1] + dec_bins[0]) / 2.0
+    m31ra = m31ra_mid
+    m31dec = m31dec_mid
     dra = (ra_bins[1] - ra_bins[0]) * np.cos(np.math.pi * m31dec / 180.0)
     ddec = dec_bins[1] - dec_bins[0]
     pixscale = 3600.0 * (dra + ddec) / 2.0
@@ -906,62 +1112,89 @@ def compare_img_to_AV(imgfile, resolution_in_arcsec='',
 
     return wcs, img_coords, img, AV_img
 
-def compare_draine_dust():
+def compare_draine_dust(AVdatafile='../Results/SecondRunLoRes/merged.npz'):
 
-    drainfile = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.fits'
+    drainefile = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.fits'
     resolution = 10.0  # arcsec
     #resolution = ''  # arcsec
     outputfile = '../Results/FirstRun/draine_matched_AV.fits'
+    scalefac = 0.74 / 1.e5  # Draine email May 29, 2013
 
-    wcs, im_coords, img, AV_img = compare_img_to_AV(drainfile, crop='True',
-                                              resolution_in_arcsec=resolution, 
-                                                    outputAVfile='')
+    wcs, im_coords, img, AV_img = compare_img_to_AV(drainefile, crop='True',
+                                                    scaleimgfactor = scalefac,
+                                                    resolution_in_arcsec=resolution, 
+                                                    outputAVfile='', AVdatafile=AVdatafile,
+                                                    usemeanAV=True)
     mask = np.where(AV_img > 0, 1.0, 0.0)
-    lowAVmask = np.where(AV_img > 0.3, 1.0, 0.0)
-    rat = AV_img/(img/1.e7)
+    lowAVmask = np.where(AV_img > 0.4, 1.0, 0.0)
+    rat = AV_img / img
     medrat = np.median(rat[np.where(AV_img > 0.75)])
+    print 'Median Ratio: ', medrat
 
-    plt.figure(1)
+    # Fit correlation to data 
+    # http://docs.scipy.org/doc/numpy/reference/generated/numpy.linalg.lstsq.html
+    # http://stackoverflow.com/questions/9990789/how-to-force-zero-interception-in-linear-regression
+    
+    i_fit = np.where((AV_img.flatten() > 0.5) & (AV_img.flatten() < 4))[0]
+    x = AV_img.flatten()[i_fit]
+    y = img.flatten()[i_fit]
+    A = np.vstack([x, np.ones(len(x))]).T
+    print 'Shape I, X, Y, A: ', i_fit.shape, x.shape, y.shape, A.shape
+    m, c = np.linalg.lstsq(A, y)[0]
+    print 'Fit by Dust Mass = ',m,' * A_V + ', c
+    m0 = np.linalg.lstsq(x[:,np.newaxis], y)[0]
+    print 'Fit by Dust Mass = ',m0,' * A_V'
+    mean_rat = 1.0 / m0
+
+    # Whole galaxy
+
+    plt.figure(1, figsize=(14,7))
     plt.clf()
     
     plt.subplot(1,3,1)
-    im = plt.imshow(img/1.e7, interpolation='nearest',aspect='auto', 
-               origin='lower', vmin=-0.005, vmax=0.15)
-    plt.title('Dust Mass')
+    im = plt.imshow(img, interpolation='nearest',aspect='auto', 
+               origin='lower', vmin=0, vmax=6)
+    plt.colorbar(im)
+    plt.title('$A_V$ (Emission)')
 
     plt.subplot(1,3,2)
     plt.imshow(AV_img, interpolation='nearest',aspect='auto', origin='lower',
-               vmin=0,vmax=4)
-    plt.title('$A_V$')
+               vmin=0,vmax=6)
+    plt.colorbar(im)
+    plt.title('$A_V$ (Extinction)')
 
     plt.subplot(1,3,3)
-    im = plt.imshow(lowAVmask*(rat - medrat), cmap='seismic',
+    im = plt.imshow(lowAVmask*((rat - mean_rat)/mean_rat), cmap='seismic',
                     interpolation='nearest', aspect='auto', 
-                    origin='lower', vmin=-25,vmax=25)
+                    origin='lower', vmin=-1,vmax=1)
     plt.colorbar(im)
-    plt.title('$A_V$ / Dust Mass')
+    plt.title('Fractional $\Delta (A_{V,emit}/A_{V,ext})$')
 
     # brick 15 zoom
-    plt.figure(2)
+    plt.figure(2, figsize=(7, 10))
     plt.clf()
 
     x0, x1, y0, y1 = 150, 235, 260, 310
     plt.subplot(3,1,1)
-    im = plt.imshow(mask[y0:y1,x0:x1]*img[y0:y1,x0:x1]/1.e7, 
+    im = plt.imshow(mask[y0:y1,x0:x1]*img[y0:y1,x0:x1], 
                     interpolation='nearest',aspect='auto', 
-                    origin='lower', vmin=-0.005, vmax=0.13)
-    plt.title('Dust Mass')
+                    origin='lower', vmin=0, vmax=6)
+    plt.colorbar(im)
+    plt.title('$A_V$ (Emission)')
 
     plt.subplot(3,1,2)
-    plt.imshow(AV_img[y0:y1,x0:x1], interpolation='nearest',aspect='auto', origin='lower',
-               vmin=0,vmax=4)
-    plt.title('$A_V$')
+    im = plt.imshow(AV_img[y0:y1,x0:x1], interpolation='nearest',aspect='auto', origin='lower',
+               vmin=0,vmax=6)
+    plt.colorbar(im)
+    plt.title('$A_V$ (Extinction)')
 
     plt.subplot(3,1,3)
-    plt.imshow(lowAVmask[y0:y1,x0:x1]*(rat[y0:y1,x0:x1]-medrat), cmap='seismic',
-               interpolation='nearest', aspect='auto', 
-               origin='lower', vmin=-25,vmax=25)
-    plt.title('$A_V$ / Dust Mass')
+    im = plt.imshow(lowAVmask[y0:y1,x0:x1]*((rat[y0:y1,x0:x1]-mean_rat)/mean_rat), 
+                    cmap='seismic',
+                    interpolation='nearest', aspect='auto', 
+                    origin='lower', vmin=-1.5,vmax=1.5)
+    plt.colorbar(im)
+    plt.title('Fractional $\Delta (A_{V,emit}/A_{V,ext})$')
 
     # correlation as points
     #plt.figure(3)
@@ -983,22 +1216,22 @@ def compare_draine_dust():
     plt.figure(4)
     plt.clf()
 
-    AVmin, AVmax = 0.0001, 4.0
-    imgmin, imgmax = 0.0, 0.175
-    ratmin, ratmax = 0.0, 75.
+    AVmin, AVmax = 0.0001, 8.0
+    imgmin, imgmax = AVmin, AVmax
+    ratmin, ratmax = 0.0, 4.0
     nbins = 100
     
     AVbins = np.linspace(AVmin, AVmax, num=nbins)
     imgbins = np.linspace(imgmin, imgmax, num=nbins)
     ratbins = np.linspace(ratmin, ratmax, num=nbins)
 
-    h_AV_img, AVedges, imgedges = np.histogram2d(img.flatten()/1.e7, AV_img.flatten(), 
-                                                 range=[[imgmin, imgmax],
-                                                        [AVmin,AVmax]], 
+    h_AV_img, AVedges, imgedges = np.histogram2d(img.flatten(), AV_img.flatten(), 
+                                                 range=[[AVmin, AVmax],
+                                                        [AVmin, AVmax]], 
                                                  bins=nbins)
     extent_AV_img = [AVmin, AVmax, imgmin, imgmax]
 
-    h_AV_AVoverimg, AVedges, imgedges = np.histogram2d((AV_img/(img/1.e7)).flatten(), 
+    h_AV_AVoverimg, AVedges, imgedges = np.histogram2d(((rat - mean_rat)/mean_rat).flatten(), 
                                                         AV_img.flatten(), 
                                                  range=[[ratmin, ratmax],
                                                         [AVmin,AVmax]], 
@@ -1007,15 +1240,50 @@ def compare_draine_dust():
 
 
     plt.subplot(1,2,1)
-    plt.imshow((h_AV_img), extent=extent_AV_img, 
+    plt.imshow(np.log(h_AV_img), extent=extent_AV_img, 
                origin='lower', aspect='auto')
-    plt.xlabel('$A_V$')
-    plt.ylabel('Dust Mass')
+    plt.plot(x, m*x + c, color='black')
+    plt.plot(x, m0*x, color='black', linestyle='-')
+    plt.xlabel('$A_V$ (Extinction)')
+    plt.ylabel('$A_V$ (Emission)')
 
     plt.subplot(1,2,2)
-    plt.imshow((h_AV_AVoverimg), extent=extent_AV_AVoverimg, 
+    plt.imshow(np.log(h_AV_AVoverimg), extent=extent_AV_AVoverimg, 
                origin='lower', aspect='auto')
     plt.xlabel('$A_V$')
-    plt.ylabel('$A_V$ / Dust Mass')
+    plt.ylabel('$A_{V,extinction}$ / $A_{V,emission}$')
 
-    return
+    return img, AV_img, i_fit
+
+def make_model_frac_red(inclination = 70., hz_over_hr = 0.2):
+
+    xvec = np.linspace(-10,10,100)
+    yvec = np.linspace(-10,10,100)
+    x, y = np.meshgrid(xvec, yvec)
+    
+    # conversion from degrees to radians
+    radeg  = np.pi / 180.
+    incl = inclination * radeg
+    b_over_a = math.cos(incl)
+    ecc = math.sqrt(1. - (b_over_a)**2.)
+    #pa_deg = 43.5
+    pa_deg = 0.0
+    pa = pa_deg * radeg
+
+    # get major axis length at each position
+    r = np.sqrt((x * math.cos(pa) + y * math.sin(pa))**2 +
+                (x * math.sin(pa) - y * math.cos(pa))**2 / (1.0 - ecc**2))
+    
+    x0 = x / math.cos(incl)
+
+    # calculate reddened fraction
+    f = (1 + np.sign(x) * hz_over_hr * math.tan(incl) * np.cos(theta)) / 2.0
+
+    # plot it...
+    plt.figure(1)
+    plt.clf()
+    im = plt.imshow(f,vmin=0, vmax=1, cmap='seismic',extent=[-10,10,-10,10])
+    plt.colorbar(im)
+
+    return f
+    

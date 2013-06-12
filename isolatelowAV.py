@@ -47,10 +47,11 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
 
     indices, rabins, decbins = mfcmd.split_ra_dec(ra, dec, d_arcsec)
 
-    cm,cmlist,cstd,cstdlist = mfcmd.median_rgb_color_map(indices, c, m,
+    cm,cmlist,cstd,cstdlist,cmean,cmeanlist = mfcmd.median_rgb_color_map(indices, c, m,
                                                          mrange, crange, rgbparam)
     cstdnodataval = -1
     cmnodataval = -1
+    cmeannodataval = -1
 
     print 'Number of valid areas in color map: ', len(cmlist)
 
@@ -94,6 +95,7 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
     ikeep_narrow = []
     cstd_narrow = []
     cm_narrow = []
+    cmean_narrow = []
     
     for j in range(len(rvec)-1):
 
@@ -104,6 +106,7 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
                 ikeep_narrow.extend(indices[x,y])                         # add indices of stars in the bin
                 cstd_narrow.extend(cstd[x,y] + np.zeros(len(indices[x,y])))  # tag stars w/ local stddev
                 cm_narrow.extend(cm[x,y] + np.zeros(len(indices[x,y])))  # tag stars w/ local median color
+                cmean_narrow.extend(cmean[x,y] + np.zeros(len(indices[x,y])))  # tag stars w/ local median color
 
     print 'Narrow: Returning ', len(ikeep_narrow),' out of ',len(c),' stars from ',n_cstd_thresh,' bins.'
 
@@ -115,6 +118,7 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
     ikeep_narrow = np.squeeze(ikeep_narrow)
     cstd_narrow = np.squeeze(cstd_narrow)
     cm_narrow = np.squeeze(cm_narrow)
+    cmean_narrow = np.squeeze(cmean_narrow)
 
     if savefile:
         
@@ -137,7 +141,8 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
                  decnarrow = decnarrow,
                  rnarrow = rnarrow,
                  cstd_narrow = cstd_narrow,
-                 cm_narrow = cm_narrow)
+                 cm_narrow = cm_narrow,
+                 cmean_narrow = cmean_narrow)
         #except:
         #    print 'Failed to write ', savefilename
               
@@ -162,6 +167,7 @@ def get_major_axis(ra, dec):
     m31ra  = 10.6847929
     m31dec = 41.2690650
     pa = 43.5
+    pa = 38.5
     incl = 70.
     m31param = [m31ra, m31dec, pa, incl]
 
@@ -428,7 +434,7 @@ def make_all_isolate_AV_for_noise_model():
 
     return
 
-def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
+def clean_low_AZ_sample(tolerance = 0.0025, makenoise=False):
 
     resultsdir = '../Unreddened/'
     fileroot = resultsdir + 'allbricks'
@@ -465,14 +471,18 @@ def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
     #                       ((r > 0.39) & (r < 0.44) & (cstd > 0.0425)) |
     #                       ((r > 0.44) & (r < 0.6) & (cstd > 0.035)) |
     #                       ((r > 0.32) & (r < 0.39)), 1, 0)
-    i_bad = np.where(((r>0.6) & (r <1.2) & (cstd > 0.07)) | 
-                     ((r > 1.1) & (r < 1.23)) |
-                     ((r > 0.95) & (r < 1.03)) |
-                     ((r > 0.6) & (r < 0.65)) |
-                     (r < 0.05) |
+    i_bad = np.where((r < 0.05) |
                      ((r > 0.41) & (r < 0.61) & (cstd > 0.085)) |
-                     ((r > 1.15) & (cstd > 0.05)) |
-                     ((r > 0.6) & (r < 0.7) & (cstd > 0.065)), 1, 0)
+                     ((r > 0.6) & (r < 0.65)) |
+                     ((r>0.6) & (r <1.2) & (cstd > 0.07)) |
+                     ((r > 0.6) & (r < 0.7) & (cstd > 0.065)) | 
+                     ((r > 0.77) & (r < 1.1) & (cstd > 0.052)) | 
+                     ((r > 0.85) & (r < 0.95) & (cstd > 0.045)) | 
+                     ((r > 0.95) & (r < 1.03)) |
+                     ((r > 1.07) & (r < 1.25)) |
+                     ((r > 1.15) & (cstd > 0.04)) |
+                     ((r > 1.25) & (cstd > 0.035)) |
+                     (r > 1.4), 1, 0)
     i_bad_noise = np.where(((r>0.7) & (r <1.1) & (cstd > 0.07)) | 
                            ((r > 0.9) & (r < 1.3) & (cstd > 0.05)) |
                            (r < 0.05) |
@@ -487,7 +497,7 @@ def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
 
     # fit polynomials to good points
 
-    npoly = 8                #...... RGB width
+    npoly = 6                #...... RGB width
     param = np.polyfit(r[i_good], cstd[i_good], npoly)
     print 'Polynomial: ', param 
     p = np.poly1d(param)
@@ -510,6 +520,35 @@ def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
                      (r > 0.03))
     plt.plot(r[ikeep], cstd[ikeep], ',', color='magenta')
     plt.plot(rp, p(rp), color='blue', linewidth=3)
+
+    # repeat polynomial fit and culling 
+
+    npoly = 6                #...... RGB width
+    param = np.polyfit(r[ikeep], cstd[ikeep], npoly)
+    print 'Polynomial: ', param 
+    p = np.poly1d(param)
+
+    rp = np.linspace(0, max(r), 100)
+
+    npoly = 6                #..... RGB color
+    param_cm = np.polyfit(r[ikeep], cm[ikeep], npoly)
+    print 'Polynomial: ', param_cm
+
+    p_cm = np.poly1d(param_cm)
+
+    # keep everything within a given tolerance of the second polynomials
+
+    cm_tolfac = 2.5
+
+    #ikeep = np.where((cstd - p(r) < tolerance) & (r > 0.03))
+    ikeep = np.where(((cstd - p(r))    < tolerance) & 
+                     ((cm   - p_cm(r)) < cm_tolfac*tolerance) & 
+                     (r > 0.03))
+    plt.plot(r[ikeep], cstd[ikeep], ',', color='red')
+    plt.plot(rp, p(rp), color='yellow', linewidth=3)
+
+
+    # label and title plot...
 
     Acol_AV = 0.33669 - 0.20443
     print 'Tolerance in units of A_V: ', tolerance / Acol_AV
@@ -536,14 +575,21 @@ def clean_low_AZ_sample(tolerance = 0.005, makenoise=False):
     plt.clf()
     plt.plot(cstd, cm, ',', color='black')
     plt.plot(cstd[ikeep], cm[ikeep], ',', color='magenta')
-    #im = plt.scatter(cstd[ikeep], cm[ikeep], c=r[ikeep], s=3, linewidth=0, vmin=0, vmax=1.35)
-    #plt.colorbar(im)
     plt.axis([0, 0.15, -0.07, 0.07])
     plt.xlabel('RGB Width')
     plt.ylabel('$\Delta(F110W - F160W)$')
     plotfilename = fileroot + '.meancolorvswidth.clean.png'
     plt.savefig(plotfilename, bbox_inches=0)
 
+    plt.figure(4)
+    plt.clf()
+    i = np.arange(len(r[ikeep]))
+    plt.plot(np.sort(r[ikeep]), i)
+    plt.axis=[0, 1.55, 0, len(ikeep)]
+    plt.xlabel('Major Axis Length (degrees)')
+    plt.ylabel('Number of Stars in Clean Sample')
+    plotfilename = fileroot + '.nstars.clean.png'
+    plt.savefig(plotfilename, bbox_inches=0)
 
     # save clean data to a new file
 
@@ -994,17 +1040,4 @@ def brick_files_containing_radii(r, r_range_brick_array):
     #except:
     #    return np.array([filename for i, filename in enumerate(bricklist) if ((rr[i,0] <= r) & 
     #                                                                          (r <= rr[i,1]))])
-
-
-
-
-    
-
-
-        
-
-
-
-
-
 
