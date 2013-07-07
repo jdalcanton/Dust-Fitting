@@ -939,10 +939,8 @@ def make_fits_image(fitsfilename, array, rabins, decbins, badval=-666, replaceva
     # if ra, dec at pixel corner
     i_ra = np.arange(0.,len(rabins)).astype(float)
     i_dec = np.arange(0.,len(decbins)).astype(float)
-    #x0 = np.interp(ra0, rabins, i_ra) + 1.0
-    #y0 = np.interp(dec0, decbins, i_dec) + 1.0
-    y0 = np.interp(ra0, rabins, i_ra) + 1.0
-    x0 = np.interp(dec0, decbins, i_dec) + 1.0
+    x0 = np.interp(ra0, rabins, i_ra) + 1.0
+    y0 = np.interp(dec0, decbins, i_dec) + 1.0
     print 'Array dimension: ', array.shape
     print 'Length in RA: ', rabins.shape
     print 'Length in Dec: ', decbins.shape
@@ -984,11 +982,11 @@ def make_radius_image(fitsfilename, rabins, decbins):
     racenvec  = (rabins[0:-2]  +  rabins[1:-1]) / 2.0
     deccenvec = (decbins[0:-2] + decbins[1:-1]) / 2.0
 
-    ra, dec = np.meshgrid(racenvec, deccenvec)
+    dec, ra = np.meshgrid(deccenvec, racenvec)
     r = iAV.get_major_axis(ra, dec)
 
     make_fits_image(fitsfilename, r, rabins, decbins)
-    make_fits_image('ra_image.fits', ra, rabins, decbins)
+    #make_fits_image('ra_image.fits', ra, rabins, decbins)
 
     return r, ra, dec
     
@@ -1006,8 +1004,15 @@ def compare_img_to_AV(imgfile, resolution_in_arcsec='', scaleimgfactor=1.0,
     img = img * scaleimgfactor
 
     # make grid of RA and Dec at each pixel
-    i_ra, i_dec = np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]))
-    i_coords = np.array([[i_ra[i,j],i_dec[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
+    ###  NOTE: Switched to make proper img sizes, but may have broken
+    ###  stuff after! Need to debug!
+    #i_ra, i_dec = np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]))
+    i_dec, i_ra = np.meshgrid(np.arange(img.shape[1]), np.arange(img.shape[0]))
+    ##i_coords = np.array([[i_ra[i,j],i_dec[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
+    i_coords = np.array([[i_dec[i,j],i_ra[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
+    print 'img.shape: ', img.shape
+    print 'i_dec.shape: ', i_dec.shape
+    print 'i_coords.shape: ', i_coords.shape
 
     #i_coords = np.array([[i_ra[20,30], i_dec[20,30]]])
 
@@ -1016,6 +1021,7 @@ def compare_img_to_AV(imgfile, resolution_in_arcsec='', scaleimgfactor=1.0,
     img_coords = np.reshape(img_coords,(i_ra.shape[0],i_ra.shape[1],2))
     ra_img  = img_coords[:,:,0]
     dec_img = img_coords[:,:,1]
+    print 'ra_img.shape:', ra_img.shape
 
     # read A_V data
 
@@ -1032,7 +1038,8 @@ def compare_img_to_AV(imgfile, resolution_in_arcsec='', scaleimgfactor=1.0,
     dec_bins = avdat['dec_bins']
     racenvec  = (ra_bins[0:-2]  +  ra_bins[1:-1]) / 2.0
     deccenvec = (dec_bins[0:-2] + dec_bins[1:-1]) / 2.0
-    ra_AV, dec_AV = np.meshgrid(racenvec, deccenvec)
+    #ra_AV, dec_AV = np.meshgrid(racenvec, deccenvec)
+    dec_AV, ra_AV = np.meshgrid(deccenvec, racenvec)
 
     # smooth to match resolution of image
 

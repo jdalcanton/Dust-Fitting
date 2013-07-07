@@ -164,6 +164,7 @@ def median_rgb_color_map(indices,c,m,mrange=[18.8,22.5],crange=[0.3,2.5],
     cmap    = empty( indices.shape, dtype=float )
     cmeanmap    = empty( indices.shape, dtype=float )
     cstdmap = empty( indices.shape, dtype=float )
+    nstarmap = empty( indices.shape, dtype=float )
 
     # calculate median number of stars per bin, to set threshold for
     # ignoring partially filled ra-dec pixels.
@@ -193,18 +194,23 @@ def median_rgb_color_map(indices,c,m,mrange=[18.8,22.5],crange=[0.3,2.5],
                                                (mtmp<mrange[1]) & 
                                                (ctmp > crange[0]) & 
                                                (ctmp<crange[1])).flat))
+            nstarmap[i,j] = len(dctmp.compress(((mtmp > mrange[0]) & 
+                                               (mtmp<mrange[1]) & 
+                                               (ctmp > crange[0]) & 
+                                               (ctmp<crange[1])).flat))
         else:
 
             cmap[i,j] = emptyval
             cmeanmap[i,j] = emptyval
             cstdmap[i,j] = emptyval
+            nstarmap[i,j] = emptyval
 
     # calculate list of good values
 
     igood = where(cmap > -1)
     print 'Median Color offset:', median(cmap[igood])
 
-    return cmap, cmap[igood], cstdmap, cstdmap[igood], cmean, cmeanmap[igood]
+    return cmap, cmap[igood], cstdmap, cstdmap[igood], cmeanmap, cmeanmap[igood], nstarmap, nstarmap[igood]
 
 
 def isolate_low_AV_color_mag(filename = '../../Data/12056_M31-B15-F09-IR_F110W_F160W.st.fits',
