@@ -10,7 +10,7 @@ from scipy import ndimage
 def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
                    frac=0.05, mrange=[19,21.5], mrange_nstar=[18.5,21.0],
                    rgbparam=[22.0, 0.72, -0.13, -0.012], nrbins = 5., 
-                   d_arcsec=10, 
+                   d_arcsec=10.0, 
                    savefile = True, savefiledir = '../Unreddened/', savefilename=''):
     """
     Return a list of color and magnitude for stars in the frac of low
@@ -33,6 +33,8 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
     ranarrow, decnarrow = ra, dec of stars in the narrowest RGB bins
     rnarrow = major axis radius of each star
     cstdnarrow = local RGB width associated with each star
+
+    nstarnarrow = number of upper RGB stars per sqr-arcsec
 
     """
  
@@ -143,6 +145,10 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
     cm_narrow = np.squeeze(cm_narrow)
     cmean_narrow = np.squeeze(cmean_narrow)
     nstar_narrow = np.squeeze(nstar_narrow)
+
+    # normalize number of stars to a surface density
+    nstar        = nstar / (d_arcsec**2)
+    nstar_narrow = nstar_narrow / (d_arcsec**2)
 
     if savefile:
         
@@ -289,7 +295,7 @@ def test_major_axis(filename = '../Results/FirstRun/ir-sf-b02-v8-st.npz'):
 
     return
 
-def make_all_isolate_AV():
+def make_all_isolate_AV(plot_results = False):
 
     datadir = '../../Data/'
     resultsdir = '../Unreddened/'
@@ -336,6 +342,7 @@ def make_all_isolate_AV():
     mr_nstar = [18.5, 21.0]
     f = 0.2
     nb = 20
+    d_arcsec = 15.0
 
     for filename in filelist:
 
@@ -344,6 +351,7 @@ def make_all_isolate_AV():
             cmarray, cmeanarray, cstdarray, nstararray, rabins, decbins, rarray, decarray, raarray = \
             isolate_low_AV(filename = filename, frac=f, 
                            mrange=mr, mrange_nstar = mr_nstar,
+                           d_arcsec = d_arcsec,
                            nrbins=nb, 
                            savefile=True,
                            datadir = datadir,
@@ -392,32 +400,32 @@ def make_all_isolate_AV():
              ragridval = np.array(ragridval))
 
 
-    plt.figure(1)
-    plt.clf()
-    plt.plot(rnarrow, cstd_narrow, ',', color='blue', alpha=0.5)
-    plt.axis([min(rnarrow), max(rnarrow), 0, 0.15])
-    plt.xlabel('Major Axis Length (degrees)')
-    plt.ylabel('RGB width')
-    plt.title('F160W Range: ' + str(mr))
-    plt.savefig(op.splitext(savefilename)[0] + '.rgbwidth.png', bbox_inches=0)
+    if (plot_results): 
 
-    plt.figure(2)
-    plt.clf()
-    plt.plot(rnarrow, cm_narrow, ',', color='blue', alpha=0.5)
-    plt.axis([min(rnarrow), max(rnarrow), -0.075, 0.075])
-    plt.xlabel('Major Axis Length (degrees)')
-    plt.ylabel('$\Delta$(F110W - F160W) Median')
-    #plt.title('Color Shift Relative to F110W-F160 = '+str(rgbparam[1])+' at F160W = ' + str(rgbparam[0]))
-    plt.savefig(op.splitext(savefilename)[0] + '.rgbcolor.png', bbox_inches=0)
+        plt.figure(1)
+        plt.clf()
+        plt.plot(rnarrow, cstd_narrow, ',', color='blue', alpha=0.5)
+        plt.axis([min(rnarrow), max(rnarrow), 0, 0.15])
+        plt.xlabel('Major Axis Length (degrees)')
+        plt.ylabel('RGB width')
+        plt.title('F160W Range: ' + str(mr))
+        plt.savefig(op.splitext(savefilename)[0] + '.rgbwidth.png', bbox_inches=0)
 
-    plt.figure(3)
-    plt.clf()
-    plt.plot(rnarrow, cmean_narrow, ',', color='blue', alpha=0.5)
-    plt.axis([min(rnarrow), max(rnarrow), -0.075, 0.075])
-    plt.xlabel('Major Axis Length (degrees)')
-    plt.ylabel('$\Delta$(F110W - F160W) Mean')
-    #plt.title('Color Shift Relative to F110W-F160 = '+str(rgbparam[1])+' at F160W = ' + str(rgbparam[0]))
-    plt.savefig(op.splitext(savefilename)[0] + '.rgbcolormean.png', bbox_inches=0)
+        plt.figure(2)
+        plt.clf()
+        plt.plot(rnarrow, cm_narrow, ',', color='blue', alpha=0.5)
+        plt.axis([min(rnarrow), max(rnarrow), -0.075, 0.075])
+        plt.xlabel('Major Axis Length (degrees)')
+        plt.ylabel('$\Delta$(F110W - F160W) Median')
+        plt.savefig(op.splitext(savefilename)[0] + '.rgbcolor.png', bbox_inches=0)
+
+        plt.figure(3)
+        plt.clf()
+        plt.plot(rnarrow, cmean_narrow, ',', color='blue', alpha=0.5)
+        plt.axis([min(rnarrow), max(rnarrow), -0.075, 0.075])
+        plt.xlabel('Major Axis Length (degrees)')
+        plt.ylabel('$\Delta$(F110W - F160W) Mean')
+        plt.savefig(op.splitext(savefilename)[0] + '.rgbcolormean.png', bbox_inches=0)
 
     return
 
@@ -583,36 +591,122 @@ def plot_allbricks_ra_dec(saveplots = True):
         ragrid, decgrid, rgrid, cstdgrid, cmgrid, cmedgrid, nstargrid \
         = read_allbricks()
 
-    # add random offset to nstar to blur points
-    nstargrid_blur = nstargrid + np.random.uniform(-0.5, 0.5, nstargrid.shape)
+    # add random offset to nstar to blur points (OBSOLETE AFTER SWITCHING TO SURFACE DENSITY)
+    #nstargrid_blur = nstargrid + np.random.uniform(-0.5, 0.5, nstargrid.shape)
 
-    # set selection of low extinction points off of log(nstar) vs rgb width (cstd)
-    a_select = 0.052
-    b_select = 0.065
-    ref_lgn = 1.5
-    ref_rgbw = 0.041
-    ref_outercolor = 0.005
+    # set selection of low extinction points off of log(nstar) vs rgb
+    # width (cstd)  (optimized for 15 arcsec selection)
+
+    a_rgbw = 0.0645
+    b_rgbw = 0.0555
+    a_rgbw_lo = 0.020
+    b_rgbw_lo = 0.0545
+    ref_lgn = -0.5
+    ref_rgbw = 0.05
     min_radius = 0.1
-    lgn = np.arange(0.5,2.5,0.01)
-    rgbw = a_select +  b_select * (lgn - ref_lgn)
-    rgbw[np.where(rgbw < ref_rgbw)] = ref_rgbw
-    i_lowAV = np.where(((cstdgrid < a_select +  b_select * (np.log10(nstargrid) - ref_lgn)) |
-                        ((cstdgrid < ref_rgbw) & (cmgrid < ref_outercolor))) & 
-                       (rgrid > min_radius))
-    i_keep = np.where(((cstd < a_select +  b_select * (np.log10(nstar) - ref_lgn)) |
-                       ((cstd < ref_rgbw) & (cm < ref_outercolor))) & 
-                      (r > min_radius))
+
+    # fit polynomial to nstar vs mean color, doing some sensible rejection & iteration
+    a_cm = -0.06
+    b_cm = 0.03
+    ref_cm = 0.03
+    max_lgn = 0.5
+    i_keep = np.where((cmgrid < ref_cm) & (np.log10(nstargrid) < max_lgn) & 
+                      (cmgrid < b_cm + a_cm * (np.log10(nstargrid) - ref_lgn)))
+    npoly = 4
+    param_n_cm = np.polyfit(np.log10(nstargrid[i_keep]), cmgrid[i_keep], npoly)
+    p_n_cm_1 = np.poly1d(param_n_cm)
+    i_keep = np.where(np.abs(p_n_cm_1(np.log10(nstargrid)) - cmgrid) < 0.025)
+    param_n_cm = np.polyfit(np.log10(nstargrid[i_keep]), cmgrid[i_keep], npoly)
+    p_n_cm_2 = np.poly1d(param_n_cm)
+    i_keep = np.where(np.abs(p_n_cm_1(np.log10(nstargrid)) - cmgrid) < 0.015)
+    param_n_cm = np.polyfit(np.log10(nstargrid[i_keep]), cmgrid[i_keep], npoly)
+    p_n_cm = np.poly1d(param_n_cm)
+    rgbcm_stddev = np.std(np.abs(p_n_cm_1(np.log10(nstargrid[i_keep])) - cmgrid[i_keep]))
+    print 'Dispersion: ', rgbcm_stddev
+    cm_stddev_range=[2.0, 5.0]
+
+    # Generate indices for grid points and all stars that meet
+    # likely low-extinction criteria.
+
+    i_lowAV_grid = np.where(((cstdgrid < b_rgbw +  a_rgbw * (np.log10(nstargrid) - ref_lgn)) |
+                             (cstdgrid < b_rgbw_lo +  a_rgbw_lo * (np.log10(nstargrid) - ref_lgn))) & 
+                            (rgrid > min_radius) & 
+                            (cmgrid < p_n_cm(np.log10(nstargrid))  
+                             + cm_stddev_range[0]*rgbcm_stddev) & 
+                            (cmgrid > p_n_cm(np.log10(nstargrid)) 
+                                 - cm_stddev_range[1]*rgbcm_stddev))
+    i_lowAV_stars = np.where(((cstd < b_rgbw +  a_rgbw * (np.log10(nstar) - ref_lgn)) |
+                              (cstd < b_rgbw_lo +  a_rgbw_lo * (np.log10(nstar) - ref_lgn))) & 
+                             (r > min_radius)  & 
+                             (cm < p_n_cm(np.log10(nstar))  
+                              + cm_stddev_range[0]*rgbcm_stddev) & 
+                             (cm > p_n_cm(np.log10(nstar)) 
+                              - cm_stddev_range[1]*rgbcm_stddev))
+
+    # save data from low extinction regions to file
+    # save clean data to a new file
+
+    resultsdir = '../Unreddened/'
+    fileroot = resultsdir + 'allbricks'
+    savefilename = fileroot + '.npz'
+    newsavefilename = fileroot + '.clean.npz'
+    print 'Saving clean data to ', newsavefilename
     
+    dat = np.load(savefilename)
+    np.savez(newsavefilename,
+             cnarrow = dat['cnarrow'][i_lowAV_stars],
+             mnarrow = dat['mnarrow'][i_lowAV_stars],
+             ikeep_narrow = dat['ikeep_narrow'][i_lowAV_stars], 
+             ranarrow = dat['ranarrow'][i_lowAV_stars],
+             decnarrow = dat['decnarrow'][i_lowAV_stars],
+             rnarrow = dat['rnarrow'][i_lowAV_stars],
+             cstd_narrow = dat['cstd_narrow'][i_lowAV_stars],
+             cm_narrow = dat['cm_narrow'][i_lowAV_stars],
+             nstarnarrow = dat['nstar_narrow'][i_lowAV_stars],
+             ragrid = dat['ragridval'][i_lowAV_grid],
+             decgrid = dat['decgridval'][i_lowAV_grid],
+             rgrid = dat['rgridval'][i_lowAV_grid],
+             cstdgrid = dat['cstdgridval'][i_lowAV_grid],
+             cmgrid = dat['cmeangridval'][i_lowAV_grid],
+             cmedgrid = dat['cmgridval'][i_lowAV_grid],
+             nstargrid = dat['nstargridval'][i_lowAV_grid],
+             param_n_cm = param_n_cm,
+             rgbcm_stddev = rgbcm_stddev,
+             cm_stddev_range = cm_stddev_range,
+             a_rgbw = a_rgbw,
+             b_rgbw = b_rgbw,
+             a_rgbw_lo = a_rgbw_lo,
+             b_rgbw_lo = b_rgbw_lo,
+             ref_lgn = ref_lgn,
+             ref_rgbw = ref_rgbw)
+    del dat   # clear memory
+
+    # set up vectors for plotting the selection boundaries
+
+    lgn = np.arange(-1.5,0.5,0.01)
+    rgbw = b_rgbw +  a_rgbw * (lgn - ref_lgn)
+    ref_rgbw = b_rgbw_lo +  a_rgbw_lo * (lgn - ref_lgn)
+    rgbw[np.where(rgbw < ref_rgbw)] = ref_rgbw
+    rgbcm_0 = b_cm + a_cm * (lgn - ref_lgn)
+    rgbcm_0[np.where(rgbcm_0 > ref_cm)] = ref_cm
+    rgbcm = p_n_cm(lgn)
+
+    # set up default point size in maps based on number of grid points (s=1 for d_arcsec=10 case)
+    print len(nstargrid), ' grid points'
+    s_size = 1.0 * (48185. / len(nstargrid))
+
+    # Plot lots of diagnostics for paper
+
     plt.figure(1)
     plt.clf()
-    im = plt.scatter(rgrid, nstargrid, c=cstdgrid, s=1, 
+    im = plt.scatter(rgrid, nstargrid, c=cstdgrid, s=s_size, 
                      linewidth=0, cmap='jet', alpha=0.5, vmin=0, vmax=0.15)
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
     color_bar.draw_all()
-    plt.axis([0, 1.55, 0, 325])
+    plt.axis([0, 1.55, 0, 3.25])
     plt.xlabel('Major Axis Length (degrees)')
-    plt.ylabel('Number of Stars')
+    plt.ylabel('$\Sigma_{stars}$  (arcsec$^{-2}$)')
     plt.title('RGB Width')
     if (saveplots): 
         plotfilename = fileroot + '.radius_nstars.png'
@@ -620,14 +714,14 @@ def plot_allbricks_ra_dec(saveplots = True):
     
     plt.figure(2)
     plt.clf()
-    im = plt.scatter(rgrid, np.log10(nstargrid_blur), c=cstdgrid, s=1, 
+    im = plt.scatter(rgrid, np.log10(nstargrid), c=cstdgrid, s=s_size, 
                      linewidth=0, cmap='jet', alpha=0.5, vmin=0, vmax=0.15)
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
     color_bar.draw_all()
-    plt.axis([0, 1.55, 0, np.log10(325)])
+    plt.axis([0, 1.55, -1.6, np.log10(3.5)])
     plt.xlabel('Major Axis Length (degrees)')
-    plt.ylabel('Log$_{10}$ Number of Stars')
+    plt.ylabel('Log$_{10}$ $\Sigma_{stars}$  (arcsec$^{-2}$)')
     plt.title('RGB Width')
     if (saveplots): 
         plotfilename = fileroot + '.radius_lognstars.png'
@@ -640,8 +734,8 @@ def plot_allbricks_ra_dec(saveplots = True):
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
     color_bar.draw_all()
-    plt.axis([0, 325, 0.01, 0.21])
-    plt.xlabel('Number of Stars')
+    plt.axis([0, 3.25, 0.01, 0.21])
+    plt.xlabel('$\Sigma_{stars}$  (arcsec$^{-2}$)')
     plt.ylabel('RGB Width')
     plt.title('Major Axis Length (degrees)')
     if (saveplots): 
@@ -655,38 +749,56 @@ def plot_allbricks_ra_dec(saveplots = True):
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
     color_bar.draw_all()
-    plt.axis([0, 325, 0.01, 0.21])
-    plt.xlabel('Number of Stars')
+    plt.axis([0, 3.25, 0.01, 0.21])
+    plt.xlabel('$\Sigma_{stars}$  (arcsec$^{-2}$)')
     plt.ylabel('RGB Width')
     plt.title('Mean RGB Color Offset')
     if (saveplots): 
         plotfilename = fileroot + '.nstars_rgbwidth_meancolorcode.png'
         plt.savefig(plotfilename, bbox_inches=0)
     
+    plt.figure(22)
+    plt.clf()
+    im = plt.scatter(rgrid, cstdgrid, c=cmgrid, s=3, 
+                     linewidth=0, cmap='seismic', alpha=0.25, vmin=-0.05, vmax=0.05)
+    color_bar = plt.colorbar(im)
+    color_bar.set_alpha(1)
+    color_bar.draw_all()
+    plt.axis([0, 1.55, 0.01, 0.21])
+    plt.xlabel('Major Axis Length (degrees)')
+    plt.ylabel('RGB Width')
+    plt.title('Mean RGB Color Offset')
+    # overplot low extinction regions
+    plt.plot(rgrid[i_lowAV_grid], cstdgrid[i_lowAV_grid], 'bo', mew=0, markersize=2.5, alpha=1.0)
+    if (saveplots): 
+        plotfilename = fileroot + '.radius_rgbwidth_meancolorcode.png'
+        plt.savefig(plotfilename, bbox_inches=0)
+    
     plt.figure(5)
     plt.clf()
-    im = plt.scatter(np.log10(nstargrid_blur), cstdgrid, c=rgrid, s=3, 
+    im = plt.scatter(np.log10(nstargrid), cstdgrid, c=rgrid, s=3, 
                      linewidth=0, cmap='jet', alpha=0.25, vmin=0, vmax=1.55)
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
     color_bar.draw_all()
-    plt.axis([0, np.log10(325.), 0.01, 0.21])
-    plt.xlabel('Log$_{10}$ Number of Stars')
+    plt.axis([-1.6, np.log10(3.5), 0.01, 0.21])
+    plt.xlabel('Log$_{10}$ $\Sigma_{stars}$  (arcsec$^{-2}$)')
     plt.ylabel('RGB Width')
     plt.title('Major Axis Length (degrees)')
+    plt.plot(lgn, rgbw, color='black', linewidth=3)
     if (saveplots): 
         plotfilename = fileroot + '.lognstars_rgbwidth_radiuscode.png'
         plt.savefig(plotfilename, bbox_inches=0)
     
     plt.figure(6)
     plt.clf()
-    im = plt.scatter(np.log10(nstargrid_blur), cstdgrid, c=cmgrid, s=3, 
+    im = plt.scatter(np.log10(nstargrid), cstdgrid, c=cmgrid, s=3, 
                      linewidth=0, cmap='seismic', alpha=0.25, vmin=-0.05, vmax=0.05)
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
     color_bar.draw_all()
-    plt.axis([0, np.log10(325.), 0.01, 0.21])
-    plt.xlabel('Log$_{10}$ Number of Stars')
+    plt.axis([-1.6, np.log10(3.5), 0.01, 0.21])
+    plt.xlabel('Log$_{10}$ $\Sigma_{stars}$  (arcsec$^{-2}$)')
     plt.ylabel('RGB Width')
     plt.title('Mean RGB Color Shift')
     plt.plot(lgn, rgbw, color='black', linewidth=3)
@@ -694,58 +806,34 @@ def plot_allbricks_ra_dec(saveplots = True):
         plotfilename = fileroot + '.lognstars_rgbwidth_meancolorcode.png'
         plt.savefig(plotfilename, bbox_inches=0)
     
-    # fit polynomial to nstar vs mean color, doing some sensible rejection & iteration
-    a_select = 0.03
-    b_select = -0.06
-    ref_lgn = 1.5
-    ref_cm = 0.03
-    ref_rgbw = 0.13
-    max_lgn = 2.5
-    i_keep = np.where((cmgrid < ref_cm) & (np.log10(nstargrid) < max_lgn) & 
-                      (cmgrid < a_select + b_select * (np.log10(nstargrid) - ref_lgn)))
-    rgbcm_0 = a_select + b_select * (lgn - ref_lgn)
-    rgbcm_0[np.where(rgbcm_0 > ref_cm)] = ref_cm
-    npoly = 4
-    param_n_cm = np.polyfit(np.log10(nstargrid[i_keep]), cmgrid[i_keep], npoly)
-    p_n_cm_1 = np.poly1d(param_n_cm)
-    rgbcm_1 = p_n_cm_1(lgn)
-    i_keep = np.where(np.abs(p_n_cm_1(np.log10(nstargrid)) - cmgrid) < 0.025)
-    param_n_cm = np.polyfit(np.log10(nstargrid[i_keep]), cmgrid[i_keep], npoly)
-    p_n_cm_2 = np.poly1d(param_n_cm)
-    rgbcm_2 = p_n_cm_2(lgn)
-    i_keep = np.where(np.abs(p_n_cm_1(np.log10(nstargrid)) - cmgrid) < 0.015)
-    param_n_cm = np.polyfit(np.log10(nstargrid[i_keep]), cmgrid[i_keep], npoly)
-    p_n_cm = np.poly1d(param_n_cm)
-    rgbcm = p_n_cm(lgn)
-    rgbcm_stddev = np.std(np.abs(p_n_cm_1(np.log10(nstargrid[i_keep])) - cmgrid[i_keep]))
-    print 'Dispersion: ', rgbcm_stddev
-
     plt.figure(20)
     plt.clf()
-    im = plt.scatter(np.log10(nstargrid_blur), cmgrid, c=cstdgrid, s=3, 
+    im = plt.scatter(np.log10(nstargrid), cmgrid, c=cstdgrid, s=3, 
                      linewidth=0, cmap='jet', alpha=0.25, vmin=0.01, vmax=0.21)
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
     color_bar.draw_all()
-    plt.axis([0, np.log10(325.), -0.075, 0.075])
-    plt.xlabel('Log$_{10}$ Number of Stars')
+    plt.axis([-1.6, np.log10(3.5), -0.075, 0.075])
+    plt.xlabel('Log$_{10}$ $\Sigma_{stars}$  (arcsec$^{-2}$)')
     plt.ylabel('Mean RGB Color Shift')
     plt.title('RGB Width')
     #plt.plot(lgn, rgbcm_0, color='black', linewidth=1)
     #plt.plot(lgn, rgbcm_1, color='black', linewidth=2)
     #plt.plot(lgn, rgbcm_2, color='black', linewidth=3)
     plt.plot(lgn, rgbcm, color='black', linewidth=3)
-    plt.plot(lgn, rgbcm + 2.0*rgbcm_stddev, color='black', linewidth=1)
-    plt.plot(lgn, rgbcm - 4.0*rgbcm_stddev, color='black', linewidth=1)
+    plt.plot(lgn, rgbcm + cm_stddev_range[0]*rgbcm_stddev, 
+             color='black', linewidth=1)
+    plt.plot(lgn, rgbcm - cm_stddev_range[1]*rgbcm_stddev, 
+             color='black', linewidth=1)
     # overplot low extinction regions
-    plt.plot(np.log10(nstargrid_blur[i_lowAV]), cmgrid[i_lowAV], 'bo', mew=0, markersize=2.5, alpha=1.0)
+    plt.plot(np.log10(nstargrid[i_lowAV_grid]), cmgrid[i_lowAV_grid], 'bo', mew=0, markersize=2.5, alpha=1.0)
     if (saveplots): 
         plotfilename = fileroot + '.lognstars_meancolor_rgbwidthcode.png'
         plt.savefig(plotfilename, bbox_inches=0)
     
     plt.figure(7)
     plt.clf()
-    im = plt.scatter(ragrid, decgrid, c=cmgrid, s=1, 
+    im = plt.scatter(ragrid, decgrid, c=cmgrid, s=s_size, 
                      linewidth=0, cmap='seismic', alpha=0.5, vmin=-0.05, vmax=0.05)
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
@@ -763,7 +851,7 @@ def plot_allbricks_ra_dec(saveplots = True):
     
     plt.figure(8)
     plt.clf()
-    im = plt.scatter(ragrid, decgrid, c=cmedgrid, s=1, 
+    im = plt.scatter(ragrid, decgrid, c=cmedgrid, s=s_size, 
                      linewidth=0, cmap='seismic', alpha=0.5, vmin=-0.05, vmax=0.05)
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
@@ -781,7 +869,7 @@ def plot_allbricks_ra_dec(saveplots = True):
     
     plt.figure(9)
     plt.clf()
-    im = plt.scatter(ragrid, decgrid, c=cstdgrid, s=1, 
+    im = plt.scatter(ragrid, decgrid, c=cstdgrid, s=s_size, 
                      linewidth=0, cmap='jet', alpha=0.5, vmin=0.02, vmax=0.15)
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
@@ -799,7 +887,7 @@ def plot_allbricks_ra_dec(saveplots = True):
 
     plt.figure(10)
     plt.clf()
-    im = plt.scatter(ragrid, decgrid, c=cstdgrid, s=1, 
+    im = plt.scatter(ragrid, decgrid, c=cstdgrid, s=s_size, 
                      linewidth=0, cmap='PuRd', alpha=0.5, vmin=0.025, vmax=0.15)
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
@@ -809,7 +897,7 @@ def plot_allbricks_ra_dec(saveplots = True):
     plt.ylabel('Dec')
     plt.title('RGB Width w/ Low $A_V$')
     # overplot low extinction regions
-    plt.plot(ragrid[i_lowAV], decgrid[i_lowAV], 'bo', mew=0, markersize=1., alpha=1.0)
+    plt.plot(ragrid[i_lowAV_grid], decgrid[i_lowAV_grid], 'bo', mew=0, markersize=1., alpha=1.0)
     for rval in rplot_vec:
         raell, decell = return_ra_dec_for_radius(rval)
         plt.plot(raell, decell, color='black', linewidth=2, linestyle='-')
@@ -819,20 +907,38 @@ def plot_allbricks_ra_dec(saveplots = True):
 
     plt.figure(11)
     plt.clf()
-    im = plt.scatter(ragrid, decgrid, c=nstargrid, s=1, 
-                     linewidth=0, cmap='jet', alpha=0.5, vmin=0, vmax=300)
+    im = plt.scatter(ragrid, decgrid, c=nstargrid, s=s_size, 
+                     linewidth=0, cmap='jet', alpha=0.5, vmin=0, vmax=3)
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
     color_bar.draw_all()
     plt.axis([12., 10.5, 41.1, 42.4])
     plt.xlabel('RA')
     plt.ylabel('Dec')
-    plt.title('Number of Stars')
+    plt.title('$\Sigma_{stars}$  (arcsec$^{-2}$)')
     for rval in rplot_vec:
         raell, decell = return_ra_dec_for_radius(rval)
         plt.plot(raell, decell, color='black', linewidth=2, linestyle='-')
     if (saveplots): 
         plotfilename = fileroot + '.nstar_position.png'
+        plt.savefig(plotfilename, bbox_inches=0)
+
+    plt.figure(21)
+    plt.clf()
+    im = plt.scatter(ragrid, decgrid, c=np.log10(nstargrid), s=s_size, 
+                     linewidth=0, cmap='gist_ncar', alpha=0.5, vmin=-1.2, vmax=np.log10(3.0))
+    color_bar = plt.colorbar(im)
+    color_bar.set_alpha(1)
+    color_bar.draw_all()
+    plt.axis([12., 10.5, 41.1, 42.4])
+    plt.xlabel('RA')
+    plt.ylabel('Dec')
+    plt.title('$\Sigma_{stars}$  (arcsec$^{-2}$)')
+    for rval in rplot_vec:
+        raell, decell = return_ra_dec_for_radius(rval)
+        plt.plot(raell, decell, color='black', linewidth=2, linestyle='-')
+    if (saveplots): 
+        plotfilename = fileroot + '.lognstar_position.png'
         plt.savefig(plotfilename, bbox_inches=0)
 
     plt.figure(14)
@@ -847,7 +953,7 @@ def plot_allbricks_ra_dec(saveplots = True):
     plt.ylabel('Mean Color Offset')
     plt.title('Major Axis Length (degrees)')
     # overplot low extinction regions
-    plt.plot(cstdgrid[i_lowAV], cmgrid[i_lowAV], 'bo', mew=0, markersize=2.5, alpha=1.0)
+    plt.plot(cstdgrid[i_lowAV_grid], cmgrid[i_lowAV_grid], 'bo', mew=0, markersize=2.5, alpha=1.0)
     if (saveplots): 
         plotfilename = fileroot + '.rgbwidth_meancolor_radiuscode.png'
         plt.savefig(plotfilename, bbox_inches=0)
@@ -855,25 +961,25 @@ def plot_allbricks_ra_dec(saveplots = True):
     plt.figure(15)
     plt.clf()
     im = plt.scatter(cstdgrid, cmgrid, c=np.log10(nstargrid), s=3, 
-                     linewidth=0, cmap='jet', alpha=0.45, vmin=0, vmax=2.5)
+                     linewidth=0, cmap='jet', alpha=0.45, vmin=-1.6, vmax=0.5)
     color_bar = plt.colorbar(im)
     color_bar.set_alpha(1)
     color_bar.draw_all()
     plt.axis([0.01, 0.15, -0.075, 0.075])
     plt.xlabel('RGB Width')
     plt.ylabel('Mean Color Offset')
-    plt.title('Log$_{10}$ Number of Stars')
+    plt.title('Log$_{10}$ $\Sigma_{stars}$  (arcsec$^{-2}$)')
     # overplot low extinction regions
-    plt.plot(cstdgrid[i_lowAV], cmgrid[i_lowAV], 'bo', mew=0, markersize=2.5, alpha=1.0)
+    plt.plot(cstdgrid[i_lowAV_grid], cmgrid[i_lowAV_grid], 'bo', mew=0, markersize=2.5, alpha=1.0)
     if (saveplots): 
         plotfilename = fileroot + '.rgbwidth_meancolor_nstarcode.png'
         plt.savefig(plotfilename, bbox_inches=0)
     
     plt.figure(12)
     plt.clf()
-    i = np.arange(len(r[i_keep]))
-    plt.plot(np.sort(r[i_keep]), i)
-    plt.axis=[0, 1.55, 0, len(i_keep)]
+    i = np.arange(len(r[i_lowAV_stars]))
+    plt.plot(np.sort(r[i_lowAV_stars]), i)
+    plt.axis=[0, 1.55, 0, len(i_lowAV_stars)]
     plt.xlabel('Major Axis Length (degrees)')
     plt.ylabel('Number of Stars in Clean Sample')
     plotfilename = fileroot + '.nstars_cumulative_radius.clean.png'
@@ -882,10 +988,10 @@ def plot_allbricks_ra_dec(saveplots = True):
 
     plt.figure(13)
     plt.clf()
-    i = np.arange(len(np.log10(nstar[i_keep])))
-    plt.plot(np.sort(np.log10(nstar[i_keep])), i)
-    plt.axis=[0, 2.5, 0, len(i_keep)]
-    plt.xlabel('Log$_{10}$ Number of Stars')
+    i = np.arange(len(np.log10(nstar[i_lowAV_stars])))
+    plt.plot(np.sort(np.log10(nstar[i_lowAV_stars])), i)
+    plt.axis=[-1.6, np.log10(3.5), 0, len(i_lowAV_stars)]
+    plt.xlabel('Log$_{10}$ $\Sigma_{stars}$  (arcsec$^{-2}$)')
     plt.ylabel('Number of Stars in Clean Sample')
     plotfilename = fileroot + '.nstars_cumulative_nstars.clean.png'
     plt.savefig(plotfilename, bbox_inches=0)
@@ -1094,8 +1200,9 @@ def read_clean(readnoise = False):
     r = dat['rnarrow']
     cstd = dat['cstd_narrow']
     cm = dat['cm_narrow']
+    nstar = dat['nstarnarrow']
 
-    return c, m, ra, dec, r, cstd, cm
+    return c, m, ra, dec, r, cstd, cm, nstar
 
 def make_low_AV_cmd(c, m, 
                     mrange = [18.2, 25.], 
