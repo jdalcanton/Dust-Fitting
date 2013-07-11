@@ -198,22 +198,22 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
     
     return c[ikeep_narrow], m[ikeep_narrow], ikeep_narrow, ra[ikeep_narrow], dec[ikeep_narrow], rnarrow, cstd_narrow, cm_narrow, cmean_narrow, nstar_narrow, cm, cmean, cstd, nstar, rabins, decbins, rarray, decarray, raarray
 
-def get_major_axis(ra, dec):
+def get_major_axis(ra, dec, m31ra=10.6847929, m31dec = 41.2690650, pa=38.5, incl=74.):
 
     # conversion from degrees to radians
     radeg  = np.pi / 180.
 
     # default M31 parameters (see also compleness.py)
-    m31ra  = 10.6847929
-    m31dec = 41.2690650
-    #pa = 43.5
+    #m31ra  = 10.6847929
+    #m31dec = 41.2690650
+
     # parameters below chosen to match isophotes in 3.6 micron images.
     # See radius_contours_on_irac1_image_log_contours.png
     # made w/ logarithmic contours of smoothed irac1 image (blue), and red overlay
     # contours from radius with m31param = [10.6847929, 41.2690650, 38.5, 74.]
     # radial contour levels at 0.125, 0.25, 0.375, etc out to 1.75
-    pa = 38.5
-    incl = 74.
+    #pa = 38.5
+    #incl = 74.
     m31param = [m31ra, m31dec, pa, incl]
 
     # useful intermediate quantities
@@ -933,7 +933,7 @@ def plot_allbricks_ra_dec(saveplots = True):
     plt.axis([12., 10.5, 41.1, 42.4])
     plt.xlabel('RA')
     plt.ylabel('Dec')
-    plt.title('$\Sigma_{stars}$  (arcsec$^{-2}$)')
+    plt.title('Log$_{10} \Sigma_{stars}$  (arcsec$^{-2}$)')
     for rval in rplot_vec:
         raell, decell = return_ra_dec_for_radius(rval)
         plt.plot(raell, decell, color='black', linewidth=2, linestyle='-')
