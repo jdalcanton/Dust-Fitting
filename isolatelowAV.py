@@ -342,13 +342,14 @@ def make_all_isolate_AV(plot_results = False):
     mr_nstar = [18.5, 21.0]
     f = 0.2
     nb = 20
-    d_arcsec = 15.0
+    d_arcsec = 30.0
 
     for filename in filelist:
 
         savefilename = op.splitext(filename)[0] + '.npz'
         c, m, i, ra, dec, r, cstd, cm, cmean, nstar, \
-            cmarray, cmeanarray, cstdarray, nstararray, rabins, decbins, rarray, decarray, raarray = \
+            cmarray, cmeanarray, cstdarray, nstararray, rabins, \
+            decbins, rarray, decarray, raarray = \
             isolate_low_AV(filename = filename, frac=f, 
                            mrange=mr, mrange_nstar = mr_nstar,
                            d_arcsec = d_arcsec,
@@ -1186,6 +1187,7 @@ def clean_low_AZ_sample(tolerance = 0.0025, color_tolerance=0.02, makenoise=Fals
 def read_clean(readnoise = False):
 
     resultsdir = '../Unreddened/'
+    resultsdir = '../Unreddened/FourthRun15arcsec/'
     savefilename = resultsdir + 'allbricks.clean.npz'
     if readnoise:
         savefilename = resultsdir + 'allbricks.noise.clean.npz'
@@ -1547,6 +1549,381 @@ def make_radial_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
             meanr_array, rrange_array, meancol_array, sigcol_array, \
             n_array, maglim_array, mboundary, cboundary
 
+
+def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3., 
+                            mrange = [18.2, 25.],
+                            crange = [0.3, 2.5],
+                            deltapixorig = [0.015,0.25],
+                            mnormalizerange = [19,21.5], 
+                            maglimoff = [0.0, 0.25],
+                            nsig_blue_color_cut = 2.0, blue_color_cut_mask_only=False,
+                            usemask=True, masksig=[2.5,3.0],
+                            makenoise=False, noisemasksig=[4.5,4.5],
+                            useq=False, reference_color=1.0,
+                            restricted_n_range=''):
+
+    # Define reddening parameters
+
+    Amag_AV = 0.20443
+    Acol_AV = 0.33669 - 0.20443
+    t = np.arctan(-Amag_AV / Acol_AV)
+    reference_color = 1.0
+
+    # read in cleaned, low reddening data
+
+    c, m, ra, dec, r, cstd, cm, nstar = read_clean()
+
+    # convert to reddening-free mag, if requested
+    if useq:
+        #m = m + (c-reference_color)*np.sin(t)/np.cos(t)
+        m = m + (c-reference_color)*(-Amag_AV / Acol_AV)
+
+    # sort according to increasing local stellar density, as tracked by nstar
+
+    isort = np.argsort(nstar)
+    c = c[isort]
+    m = m[isort]
+    r = r[isort]
+    ra = ra[isort]
+    dec = dec[isort]
+    cstd = cstd[isort]
+    cm = cm[isort]
+    nstar = np.log10(nstar[isort])
+
+    # break into bins of different nstar based on number of stars in normalization range. 
+    # Normal brick wide low-AV has ~10K - 20K total, but many of those are in RC.
+
+    istar = np.arange(len(nstar))
+    irgb = np.where((mnormalizerange[0] < m) & (m < mnormalizerange[1]))[0]
+    print 'Starting with ', len(nstar), ' stars total.'
+    print 'Number of upper RGB Stars: ', len(irgb)
+
+    nstep = int(nrgbstars / nsubstep)
+
+    nrgblo = np.arange(0, len(irgb)-nstep, nstep)
+    nrgbhi = nrgblo + int(nrgbstars)
+    nrgbhi = np.where(nrgbhi < len(irgb)-1, nrgbhi, len(irgb)-1) # tidy up ends
+
+    nnstarlo = istar[irgb[nrgblo]]
+    nnstarhi = istar[irgb[nrgbhi]]
+
+    nnstarhi = np.where(nnstarhi < len(istar)-1, nnstarhi, len(istar)-1)     # tidy up ends again
+    nnstarbins = len(nnstarhi)
+
+    #print 'nrgblo: ', nrgblo
+    #print 'nrgbhi: ', nrgbhi
+    #print 'nnstarlo: ', nnstarlo
+    #print 'nnstarhi: ', nnstarhi
+
+    print 'Splitting into ', len(nnstarhi),' bins of nstar with ',nrgbstars,' in each upper RGB.'
+
+    # merge adjacent bins, if they're too close together....
+
+    min_nstar = 0.05
+    nnstar_orig = len(nnstarlo)
+    meannstar = np.array([np.average(nstar[nnstarlo[i]:nnstarhi[i]]) 
+                          for i in range(len(nnstarlo))])
+    dmeannstar = np.array([meannstar[i+1] - meannstar[i] 
+                           for i in range(len(nnstarlo)-1)])
+    bad_dnstar = np.where(dmeannstar < min_nstar)[0]
+
+    # are there any gaps that are too small?
+    while (len(bad_dnstar) > 0): 
+
+        # and is the gap not in the last, unmergeable bin?
+        if (bad_dnstar[0] + 1 < len(nnstarlo) - 1):
+
+            # if so, merge the first instance with the adjacent cell
+            print 'Merging ', bad_dnstar[0], ' with ', bad_dnstar[0] + 1, '.  ', \
+                len(bad_dnstar)-1, ' small gaps remaining.'
+            nnstarlo = np.delete(nnstarlo, bad_dnstar[0] + 1)   
+            nnstarhi = np.delete(nnstarhi, bad_dnstar[0])
+
+            meannstar = np.array([np.average(nstar[nnstarlo[i]:nnstarhi[i]]) 
+                                  for i in range(len(nnstarlo))])
+            dmeannstar = np.array([meannstar[i+1] - meannstar[i] 
+                                   for i in range(len(nnstarlo)-1)])
+            bad_dnstar = np.where(dmeannstar < min_nstar)[0]
+
+        else:
+            
+            bad_dnstar = bad_dnstar[:-1]
+
+    print 'Reduced number of bins of nstar from ', nnstar_orig, ' to ', len(nnstarlo)
+
+    nnstarbins = len(nnstarhi)
+
+    # run once to get shape of CMD array
+    cmd, fgmask, meancol, sigcol, cboundary, mboundary, extent = \
+        make_low_AV_cmd(c, m, 
+                        mrange = mrange,
+                        crange = crange,
+                        deltapix = deltapixorig,
+                        masksig = masksig)
+    
+    # setup interpolation to convert pixel values of meancol into numerical values
+    mcen = (mboundary[0:-1] + mboundary[1:]) / 2.0
+    ccen = (cboundary[0:-1] + cboundary[1:]) / 2.0
+    cinterp  = interp1d(np.arange(len(ccen)), ccen)
+    deltapix =  np.array([cboundary[1] - cboundary[0], 
+                          mboundary[1] - mboundary[0]])
+
+    # initialize storage arrays
+    cmd_array = np.zeros([cmd.shape[0], cmd.shape[1], nnstarbins])
+    mask_array = np.zeros([cmd.shape[0], cmd.shape[1], nnstarbins])
+    meancol_array = np.zeros([meancol.shape[0], nnstarbins])
+    sigcol_array = np.zeros([sigcol.shape[0], nnstarbins])
+    meannstar_array = np.zeros(nnstarbins)
+    nstarrange_array = np.zeros([2,nnstarbins])
+    num_per_cmd_array = np.zeros(nnstarbins)
+    maglim_array = np.zeros([2,nnstarbins])
+
+    # initialize magnitude limit polynomials
+    completenessdir = '../../Completeness/'
+    m110file = 'completeness_ra_dec.st.F110W.npz'
+    m160file = 'completeness_ra_dec.st.F160W.npz'
+        
+    m110dat = np.load(completenessdir + m110file)
+    m110polyparam = m110dat['param']
+    m160dat = np.load(completenessdir + m160file)
+    m160polyparam = m160dat['param']
+        
+    p110 = np.poly1d(m110polyparam)
+    p160 = np.poly1d(m160polyparam)
+
+    # initialize plot
+    plt.figure(1)
+    plt.clf()
+
+    #
+    if usemask:
+        print 'Masking out noise in stddeviation range: ', masksig
+
+    # Loop through bins of log10(nstar)
+    for i in range(len(nnstarlo)):
+        
+        cmd, fgmask, meancol, sigcol, cboundary, mboundary, extent = \
+            make_low_AV_cmd(c[nnstarlo[i]:nnstarhi[i]],
+                            m[nnstarlo[i]:nnstarhi[i]],
+                            mrange = mrange,
+                            crange = crange,
+                            deltapix = deltapixorig,
+                            masksig = masksig)
+
+        # mask out noise, if requested
+        if usemask:
+            cmd = cmd * fgmask
+
+        # normalize CMD to a constant # of stars for magnitudes in mnormalizerange
+        irgb = np.where((mnormalizerange[0] < mboundary) & (mboundary < mnormalizerange[1]))[0]
+        rgbrange = [min(irgb), max(irgb)]
+        norm = np.sum(cmd[rgbrange[0]:rgbrange[1],:])
+        nstars_per_cmd = np.sum(cmd)
+        cmd = cmd.astype(float) / float(norm)
+
+        # copy results to appropriate array
+        cmd_array[:,:,i] = cmd
+        meancol_array[:,i] = cinterp(meancol)
+        sigcol_array[:,i] = sigcol * deltapix[0]
+        meannstar_array[i] = np.average(nstar[nnstarlo[i]:nnstarhi[i]])
+        nstarrange_array[:,i] = [nstar[nnstarlo[i]], nstar[nnstarhi[i]]]
+        num_per_cmd_array[i] = len(nstar[nnstarlo[i]:nnstarhi[i]])
+
+        # calculate corresponding magnitude limits
+
+        maglim110 = p110(meannstar_array[i]) - maglimoff[0]
+        maglim160 = p160(meannstar_array[i]) - maglimoff[1]
+        maglim_array[:,i] = np.array([maglim110, maglim160])
+
+        m110range = [16.0, maglim110]
+        m160range = [18.4, maglim160]
+
+        # generate mask
+        bluecolorlim = cboundary[np.maximum(np.rint(meancol - nsig_blue_color_cut * 
+                                                    sigcol).astype(int), 0)]
+        if blue_color_cut_mask_only: 
+            color_mag_datamask = mfcmd.make_data_mask(cmd, cboundary, 
+                                                      mboundary, [0.0, 100.], [0., 100.],
+                                                      bluecolorlim)
+        else:
+            color_mag_datamask = mfcmd.make_data_mask(cmd, cboundary, 
+                                                      mboundary, m110range, m160range, 
+                                                      bluecolorlim)
+        if useq: 
+
+            if blue_color_cut_mask_only: 
+                color_mag_datamask = mfcmd.make_data_mask(cmd, cboundary, 
+                                                          mboundary, [0.0, 100.], [0., 100.],
+                                                          bluecolorlim, useq=[reference_color])
+            else:
+                color_mag_datamask = mfcmd.make_data_mask(cmd, cboundary, 
+                                                          mboundary, m110range, m160range, 
+                                                          bluecolorlim, useq=[reference_color])
+
+        mask_array[:,:,i] = color_mag_datamask
+
+        print 'Bin: ', i, '  logN: ', ("%g" % round(meannstar_array[i],3)), 'maglim', ("%g" % round(maglim110,2)), ("%g" % round(maglim160,2)),' Nstars_Per_Cmd: ',nstars_per_cmd, ' NRGB: ',norm
+
+        #plt.imshow(cmd,  extent=extent, aspect='auto', interpolation='nearest', vmin=0, vmax = 0.1)
+        plt.imshow(0.01*color_mag_datamask + cmd,  extent=extent, aspect='auto', interpolation='nearest', vmin=0, vmax = 0.1)
+        plt.xlabel('F110W - F160W')
+        plt.ylabel('F160W')
+        plt.title('Log$_{10}$ N$_{star}$: '+ ("%g" % np.round(meannstar_array[i],3)) + 
+                  '  F160W 50% Completeness: ' + ("%g" % np.round(maglim160,2)))
+        plt.draw()
+
+    # make a noise model, if requested
+
+    # initialize noise array to prevent griping on return when not calculating
+    # noise model.
+
+    noise_array = np.zeros([cmd.shape[0], cmd.shape[1], nnstarbins])
+    noisefrac_array = np.zeros(nnstarbins)
+
+    if makenoise:
+
+        noise_smooth_mag = np.array([0.2, 0.5])    # Note: filter is with opposite polarity
+        noise_smooth = np.rint(noise_smooth_mag / deltapix)
+        #noise_smooth = [3, 10]  # mag, color, in pixels
+        print 'Building Noise Model...Smoothing with: ', noise_smooth
+
+        c_n, m_n, ra_n, dec_n, r_n, cstd_n, cm_n, nstar_n = read_clean(readnoise = True)
+        # convert to reddening-free mag, if requested
+        if useq:
+            m_n = m_n + (c_n-reference_color)*(-Amag_AV / Acol_AV)
+
+        isort = np.argsort(nstar_n)
+        c_n = c_n[isort]
+        m_n = m_n[isort]
+        r_n = r_n[isort]
+        ra_n = ra_n[isort]
+        dec_n = dec_n[isort]
+        cstd_n = cstd_n[isort]
+        cm_n = cm_n[isort]
+        nstar_n = np.log10(nstar_n[isort])
+
+        nstar_n_range = [min(nstar_n), max(nstar_n)]
+
+        # initialize array to save noise model
+
+        noise_array = np.zeros([cmd.shape[0], cmd.shape[1], nnstarbins])
+        noisefrac_array = np.zeros(nnstarbins)
+
+        # set up function to quickly find indices of stars within given n-range
+        i_nstarinterp  = interp1d(nstar_n, np.arange(len(nstar_n)))
+
+        for i in range(len(nnstarlo)):
+
+            # interpolate to find range of points, enforcing boundaries of interpolation
+            nstar_range = nstarrange_array[:,i]
+            #print nstar_range[0], nstar_n_range[0]
+            #print nstar_range[1], nstar_n_range[1]
+            nlo_val = np.maximum(nstar_range[0], nstar_n_range[0])+0.000000001
+            nhi_val = np.minimum(nstar_range[1], nstar_n_range[1])
+            #print nlo_val, nhi_val
+            i_lo = np.ceil(i_nstarinterp(nlo_val))
+            i_hi = np.floor(i_nstarinterp(nhi_val))
+            #print 'ilo: ', i_lo, ' ihi: ', i_hi
+
+            cmd_n, noisemask, meancol_n, sigcol_n, cboundary_n, mboundary_n, extent_n =   \
+                make_low_AV_cmd(c_n[i_lo:i_hi],
+                                m_n[i_lo:i_hi],
+                                mrange = mrange,
+                                crange = crange,
+                                deltapix = deltapixorig,
+                                masksig = noisemasksig)
+
+            nmag = noisemask.shape[0]
+            
+            # invert sense of mask, and smooth
+            noisemask = abs(noisemask - 1)
+
+            # trim blue side
+            bluecutmask = 1.0 + np.zeros(noisemask.shape)
+            bluecutmask = np.array([np.where((cboundary[:-1] > bluecolorlim[j]), 
+                                             1.0, 0.0) for j in range(nmag)])
+            noisemask = noisemask * bluecutmask
+
+
+            noise_model_orig = cmd_n * noisemask
+            noise_model = ndimage.filters.uniform_filter(noise_model_orig,
+                                                         size=[noise_smooth[1],noise_smooth[0]])
+
+            # calculate fraction in noise model
+            color_mag_datamask = mask_array[:,:,i]
+            nfg = (cmd_n * color_mag_datamask).sum()
+            nnoise = (noise_model * color_mag_datamask).sum()
+            frac_noise = nnoise / nfg
+            print 'ilo: ', i_lo, ' ihi: ', i_hi, ' Noise fraction: ', frac_noise
+
+            # do a rough normalization (will have to redo after radial interpretation and data mask)
+            noise_model = noise_model / float(nnoise)
+
+            noise_array[:,:,i] = noise_model
+            noisefrac_array[i] = frac_noise
+
+            plt.imshow(0.005*color_mag_datamask + noise_model,  extent=extent, aspect='auto', 
+                       interpolation='nearest', vmin=0, vmax=0.1)
+            plt.xlabel('F110W - F160W')
+            plt.ylabel('F160W')
+            plt.title('Log$_{10} N_{star}$: '+ ("%g" % np.round(meannstar_array[i],3)) + 
+                      '  F160W 50% Completeness: ' + ("%g" % np.round(maglim160,2)))
+            plt.draw()
+
+    if restricted_n_range != '':
+
+        print 'Trimming down to restricted nstar range: ', restricted_n_range
+        # fix limits of restricted_n_range
+        restricted_n_range = [np.maximum(restricted_n_range[0],np.min(meannstar_array)),
+                              np.minimum(restricted_n_range[1],np.max(meannstar_array))]
+        i_nstarinterp  = interp1d(meannstar_array, np.arange(len(meannstar_array)))
+        i = i_nstarinterp(restricted_n_range)
+        ilo = np.maximum(int(np.floor(i[0])), 0)
+        ihi = np.minimum(int(np.ceil(i[1]) + 1), len(meannstar_array))
+        print 'Grabbing index range: ', [ilo, ihi]
+        return cmd_array[:,:,ilo:ihi], mask_array[:,:,ilo:ihi], \
+            noise_array[:,:,ilo:ihi], noisefrac_array[ilo:ihi], \
+            meannstar_array[ilo:ihi], nstarrange_array[:,ilo:ihi], \
+            meancol_array[:,ilo:ihi], sigcol_array[:,ilo:ihi], \
+            num_per_cmd_array[ilo:ihi], maglim_array[:,ilo:ihi], mboundary, cboundary
+    
+    else:
+
+        return cmd_array, mask_array, noise_array, noisefrac_array, \
+            meannstar_array, nstarrange_array, meancol_array, sigcol_array, \
+            num_per_cmd_array, maglim_array, mboundary, cboundary
+
+def plot_RGB_locii():
+
+    cmda,ma,na,nfa,mnsa,nsra,mca,sca,npca,mla,mb,cb = \
+        make_nstar_selected_low_AV_cmds(makenoise=False)
+
+    plt.figure(1)
+    plt.clf()
+    
+    mvec = (mb[:-1] + mb[1:])/2.
+    k = np.where(mvec < 24)
+    print len(mvec)
+    print mca.shape
+
+
+    n_lines = mca.shape[1]
+    # http://stackoverflow.com/questions/4805048/how-to-get-different-lines-for-different-plots-in-a-single-figure
+    colormap = plt.cm.gist_ncar
+    plt.gca().set_color_cycle([colormap(i) 
+                               for i in np.linspace(0, 0.9, n_lines)])
+
+    labels = []
+    for i in np.arange(n_lines):
+        plt.plot(mca[:,i], mvec)
+        #labels.append(r'$log_{10}N=%5.2f$' % (mnsa[i]))
+        labels.append(r'$%5.2f$' % (mnsa[i]))
+
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('F160W')
+    plt.axis([0.3, 1.35, 24, 18.])
+    plt.legend(labels, loc='lower right', labelspacing=0, 
+               ncol=2, columnspacing=1.0)
 
 def get_radius_range_of_all_bricks():
     """
