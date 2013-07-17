@@ -1,6 +1,7 @@
 import pylab
 import math
 import numpy as np
+import scipy.special as spec
 import scipy.stats as stats
 import scipy.integrate as integrate
 import scipy.interpolate as interp
@@ -1293,4 +1294,206 @@ def make_model_frac_red(inclination = 70., hz_over_hr = 0.2):
     plt.colorbar(im)
 
     return f
+
+def plot_all_low_AV_rgb_maglims():
+
+    imgfileroot = '../Unreddened/low_AV_CMD_r.'
+
+    plot_low_AV_rgb_maglims(ikeep=43)
+    plt.savefig(imgfileroot + '0.28.png')
     
+    plot_low_AV_rgb_maglims(ikeep=20)
+    plt.savefig(imgfileroot + '0.5.png')
+    
+    plot_low_AV_rgb_maglims(ikeep=11)
+    plt.savefig(imgfileroot + '0.7.png')
+
+    plot_low_AV_rgb_maglims(ikeep=3)
+    plt.savefig(imgfileroot + '1.1.png')
+
+    return
+    
+def plot_low_AV_rgb_maglims(ikeep=20, reflgnstar=2.0, nrgbstars = 5000, nsubstep=3., 
+                            mrange = [18.2, 25.],
+                            crange = [0.3, 2.5],
+                            deltapixorig = [0.015,0.25],
+                            mnormalizerange = [19,21.5], 
+                            maglimoff = [0.0, 0.25]):
+
+    # plot CMD and magnitude limit diagram for desired value of reflgnstar (log10 stellar surf dens)
+
+    # Define reddening parameters
+
+    Amag_AV = 0.20443
+    Acol_AV = 0.33669 - 0.20443
+    t = np.arctan(-Amag_AV / Acol_AV)
+    reference_color = 1.0
+
+    # read in cleaned, low reddening data
+
+    c, m, ra, dec, r, cstd, cm, nstar = iAV.read_clean()
+
+    # sort according to increasing local stellar density, as tracked by nstar
+
+    isort = np.argsort(nstar)
+    c = c[isort]
+    m = m[isort]
+    r = r[isort]
+    ra = ra[isort]
+    dec = dec[isort]
+    cstd = cstd[isort]
+    cm = cm[isort]
+    nstar = np.log10(nstar[isort])
+
+    # break into bins of different nstar based on number of stars in normalization range. 
+    # Normal brick wide low-AV has ~10K - 20K total, but many of those are in RC.
+
+    istar = np.arange(len(nstar))
+    irgb = np.where((mnormalizerange[0] < m) & (m < mnormalizerange[1]))[0]
+    print 'Starting with ', len(nstar), ' stars total.'
+    print 'Number of upper RGB Stars: ', len(irgb)
+
+    nstep = int(nrgbstars / nsubstep)
+
+    nrgblo = np.arange(0, len(irgb)-nstep, nstep)
+    nrgbhi = nrgblo + int(nrgbstars)
+    nrgbhi = np.where(nrgbhi < len(irgb)-1, nrgbhi, len(irgb)-1) # tidy up ends
+
+    nnstarlo = istar[irgb[nrgblo]]
+    nnstarhi = istar[irgb[nrgbhi]]
+
+    nnstarhi = np.where(nnstarhi < len(istar)-1, nnstarhi, len(istar)-1)     # tidy up ends again
+    nnstarbins = len(nnstarhi)
+
+    #print 'nrgblo: ', nrgblo
+    #print 'nrgbhi: ', nrgbhi
+    #print 'nnstarlo: ', nnstarlo
+    #print 'nnstarhi: ', nnstarhi
+
+    print 'Splitting into ', len(nnstarhi),' bins of nstar with ',nrgbstars,' in each upper RGB.'
+
+    nnstarbins = len(nnstarhi)
+
+    # initialize magnitude limit polynomials
+    completenessdir = '../../Completeness/'
+    m110file = 'completeness_ra_dec.st.F110W.nstar.npz'
+    m160file = 'completeness_ra_dec.st.F160W.nstar.npz'
+        
+    m110dat = np.load(completenessdir + m110file)
+    m110polyparam = m110dat['param']
+    m160dat = np.load(completenessdir + m160file)
+    m160polyparam = m160dat['param']
+        
+    p110 = np.poly1d(m110polyparam)
+    p160 = np.poly1d(m160polyparam)
+
+    # Loop through bins of log10(nstar) to get mean nstar
+
+    meannstar_array = np.zeros(nnstarbins)
+    meanr_array = np.zeros(nnstarbins)
+
+    for i in range(len(nnstarlo)):
+
+        meannstar_array[i] = np.average(nstar[nnstarlo[i]:nnstarhi[i]])
+        meanr_array[i] = np.average(r[nnstarlo[i]:nnstarhi[i]])
+
+    # select bin with closest to desired nstar
+
+        # http://stackoverflow.com/questions/9706041/finding-index-of-an-item-closest-to-the-value-in-a-list-thats-not-entirely-sort
+    #ikeep = min(range(len(meannstar_array.tolist())), key=lambda i: abs(meannstar_array-reflgnstar))
+    print 'Selecting element ',ikeep,' where meannstar=', meannstar_array[ikeep]
+    
+
+    # grab appropriate values from array
+
+    meanr = meanr_array[ikeep]
+    lgnstar = meannstar_array[ikeep]
+    ckeep = c[nnstarlo[ikeep]:nnstarhi[ikeep]]
+    mkeep = m[nnstarlo[ikeep]:nnstarhi[ikeep]]
+
+    # set up magnitude limits
+
+    mlim110 = p110(lgnstar)
+    mlim160 = p160(lgnstar)
+    cvec = np.linspace(0, 3.5, 100)
+    maglim160 = mlim160 + 0*cvec
+    maglim110 = mlim110 - cvec
+    maglim = np.minimum(maglim160, maglim110)
+
+    # plot stars
+
+    plt.figure(1)
+    plt.clf()
+    plt.plot(ckeep, mkeep, ',', alpha=0.2, color='blue')
+    plt.plot(cvec, maglim, color='black', linewidth=3)
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('F160W')
+    #plt.title(r"$\Sigma_{stars} = %5.2f$ arcsec$^{-2}$    $\langle r \rangle = %4.2f$ degrees" % 
+    #          (lgnstar, meanr))
+    plt.axis([0, 3.5, 25.5, 18])
+
+    ax = plt.gca()
+    ax.annotate(r"$\Sigma_{stars} = %4.2f$ arcsec$^{-2}$" % 
+                (10.**lgnstar), xy=(2.25,24.5), xytext=None, horizontalalignment='left',
+                fontsize=15.0)
+    ax.annotate(r"$\langle r \rangle \approx %4.2f$ degrees" % 
+                (meanr),   xy=(2.25,25), xytext=None, horizontalalignment='left',
+                fontsize=15.0)
+    
+    # add reddening vector
+
+    AV = 5.
+    cref = 1.0
+    mref = 18.8
+    plt.arrow(cref, mref, AV*Acol_AV, AV*Amag_AV, width=0.05, color='r')
+    plt.annotate(r"$A_V=5$", xy=(cref + 0.5*AV*Acol_AV, mref+0.5*AV*Amag_AV-0.1), xytext=None)
+    cref = 0.94
+    mref = 19.8
+    plt.arrow(cref, mref, AV*Acol_AV, AV*Amag_AV, width=0.05, color='r')
+    cref = 0.85
+    mref = 20.8
+    plt.arrow(cref, mref, AV*Acol_AV, AV*Amag_AV, width=0.05, color='r')
+    cref = 0.75
+    mref = 21.8
+    plt.arrow(cref, mref, AV*Acol_AV, AV*Amag_AV, width=0.05, color='r')
+    
+    return
+
+def plot_cumulative_log_normal():
+
+    # investigate fraction of gas above give AV.
+    # results: at A_median, 50% have higher AV (by design)
+    #          10% have AV higher than A/Amedian > 1 + 2*sig (roughly)
+
+    A_over_Amedian = np.linspace(0, 5., 100)
+    
+    sigvec = [0.3, 0.5, 0.7]
+    nsig = len(sigvec)
+    p = np.zeros((nsig,len(A_over_Amedian)))
+
+    for i, sig in enumerate(sigvec):
+        
+        p[i,:] = 0.5*spec.erfc(np.log(A_over_Amedian)/(sig*np.sqrt(2)))
+
+    plt.figure(1)
+    plt.clf()
+    plt.plot([1, 1],[-6,1],linewidth=0.5, color='grey')
+    plt.plot([0, 10],[-1,-1],linewidth=0.5, color='grey')
+    p1 = plt.plot(A_over_Amedian, np.log10(p[0,:]), linewidth=2, color='black')
+    p2 = plt.plot(A_over_Amedian, np.log10(p[1,:]), linewidth=3, color='black')
+    p3 = plt.plot(A_over_Amedian, np.log10(p[2,:]), linewidth=5, color='black')
+    plt.axis([0,4,-2,0.05])
+    plt.xlabel(r"$A / A_{median}$")
+    plt.ylabel(r"$log_{10} p(> A / A_{median} | \sigma_A)$")
+
+    plt.legend([p1,p2,p3], ["$\sigma_A=0.3$", "$\sigma_A=0.5$", "$\sigma_A=0.7$"], frameon=False)
+
+    return
+
+
+    
+
+
+    
+
+

@@ -2,6 +2,7 @@ import math
 import numpy as np
 import read_brick_data as rbd
 import makefakecmd as mfcmd
+import fit_disk as fitdisk
 import os.path as op
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
@@ -1346,8 +1347,8 @@ def make_radial_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
 
     # initialize magnitude limit polynomials
     completenessdir = '../../Completeness/'
-    m110file = 'completeness_ra_dec.st.F110W.npz'
-    m160file = 'completeness_ra_dec.st.F160W.npz'
+    m110file = 'completeness_ra_dec.st.F110W.radius.npz'
+    m160file = 'completeness_ra_dec.st.F160W.radius.npz'
         
     m110dat = np.load(completenessdir + m110file)
     m110polyparam = m110dat['param']
@@ -1680,8 +1681,8 @@ def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
 
     # initialize magnitude limit polynomials
     completenessdir = '../../Completeness/'
-    m110file = 'completeness_ra_dec.st.F110W.npz'
-    m160file = 'completeness_ra_dec.st.F160W.npz'
+    m110file = 'completeness_ra_dec.st.F110W.nstar.npz'
+    m160file = 'completeness_ra_dec.st.F160W.nstar.npz'
         
     m110dat = np.load(completenessdir + m110file)
     m110polyparam = m110dat['param']
@@ -1893,37 +1894,90 @@ def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
             meannstar_array, nstarrange_array, meancol_array, sigcol_array, \
             num_per_cmd_array, maglim_array, mboundary, cboundary
 
-def plot_RGB_locii():
+def plot_RGB_locii(plotfileroot='../Unreddened/lowAV_RGB'):
 
     cmda,ma,na,nfa,mnsa,nsra,mca,sca,npca,mla,mb,cb = \
         make_nstar_selected_low_AV_cmds(makenoise=False)
 
-    plt.figure(1)
-    plt.clf()
-    
+    # initialize magnitude limit polynomials
+    completenessdir = '../../Completeness/'
+    m160file = 'completeness_ra_dec.st.F160W.nstar.npz'
+    m160dat = np.load(completenessdir + m160file)
+    m160polyparam = m160dat['param']
+    p160 = np.poly1d(m160polyparam)
+
     mvec = (mb[:-1] + mb[1:])/2.
     k = np.where(mvec < 24)
     print len(mvec)
     print mca.shape
 
-
     n_lines = mca.shape[1]
+
+    plt.figure(1)
+    plt.clf()
+    
     # http://stackoverflow.com/questions/4805048/how-to-get-different-lines-for-different-plots-in-a-single-figure
-    colormap = plt.cm.gist_ncar
+    colormap = plt.cm.gist_ncar_r
     plt.gca().set_color_cycle([colormap(i) 
-                               for i in np.linspace(0, 0.9, n_lines)])
+                               for i in np.linspace(0.05, 0.9, n_lines)])
 
     labels = []
     for i in np.arange(n_lines):
-        plt.plot(mca[:,i], mvec)
+        
+        # set up magnitude limit
+
+        j = n_lines - i - 1
+        mlim160 = p160(mnsa[j])
+        ikeep = np.where(mvec <= mlim160)[0]
+
+        plt.plot(mca[ikeep,j], mvec[ikeep], linewidth=3)
         #labels.append(r'$log_{10}N=%5.2f$' % (mnsa[i]))
-        labels.append(r'$%5.2f$' % (mnsa[i]))
+        labels.append(r'$%5.2f$' % (mnsa[j]))
 
     plt.xlabel('F110W - F160W')
     plt.ylabel('F160W')
-    plt.axis([0.3, 1.35, 24, 18.])
+    plt.axis([0.5, 1.25, 25, 18.])
     plt.legend(labels, loc='lower right', labelspacing=0, 
                ncol=2, columnspacing=1.0)
+    plt.savefig(plotfileroot+'.locii.png', bbox_inches=0)
+
+    plt.figure(2)
+    plt.clf()
+    
+    # http://stackoverflow.com/questions/4805048/how-to-get-different-lines-for-different-plots-in-a-single-figure
+    colormap = plt.cm.gist_ncar_r
+    plt.gca().set_color_cycle([colormap(i) 
+                               for i in np.linspace(0.05, 0.9, n_lines)])
+
+    labels = []
+    for i in np.arange(n_lines):
+        
+        # set up magnitude limit
+
+        j = n_lines - i - 1
+        mlim160 = p160(mnsa[j])
+        ikeep = np.where(mvec <= mlim160)[0]
+
+        plt.plot(mvec[ikeep], sca[ikeep,j], linewidth=3)
+        #labels.append(r'$log_{10}N=%5.2f$' % (mnsa[i]))
+        labels.append(r'$%5.2f$' % (mnsa[j]))
+
+    plt.xlabel('F160W')
+    plt.ylabel(r"$\sigma_{F110W-F160W}$")
+    plt.axis([18., 25., 0, 0.19])
+    plt.legend(labels, loc='upper left', labelspacing=0, 
+               ncol=4, columnspacing=1.0)
+
+    Amag_AV = 0.20443
+    AV = 0.25
+    mref = 24.0
+    sigref = 0.0
+    arrowhead = 0.01
+    plt.arrow(mref, sigref, 0*AV, Amag_AV*AV-arrowhead, width=0.05, color='r', 
+              head_length=arrowhead)
+    plt.annotate(r"$A_V=0.25$", xy=(24.1,0.025), xytext=None, )
+
+    plt.savefig(plotfileroot+'.width.png', bbox_inches=0)
 
 def get_radius_range_of_all_bricks():
     """
@@ -1993,4 +2047,41 @@ def brick_files_containing_radii(r, r_range_brick_array):
     #except:
     #    return np.array([filename for i, filename in enumerate(bricklist) if ((rr[i,0] <= r) & 
     #                                                                          (r <= rr[i,1]))])
+
+def get_nstar_at_ra_dec(ra, dec, renormalize_to_surfdens=True):
+
+    # use results from fit_disk.py to return estimate of local nstar
+    # based on sum of gaussian model
+
+    ra0  = 10.6847929
+    dec0 = 41.2690650
+    ncomp = 12
+    p12 = [ra0, dec0, 
+           5.18815078e+01,   8.12854891e+01,   1.15172061e+02,   7.99289784e-02,   
+           3.87304417e+01,   8.47519489e+01,   1.84756225e+02,   8.16379274e-02,   
+           3.37469947e+01,   4.09064728e+01,   8.27126913e+01,   9.37481884e-02,   
+           3.20786219e+01,   4.55816926e+01,   1.26139485e+02,   1.14824313e-01,   
+           5.32233413e+01,   4.22564593e+01,   8.12427291e+01,   1.49078468e-01,   
+           4.64183669e+01,   7.72900759e+01,   5.48387216e+01,   1.96137141e-01,   
+           4.08805925e+01,   4.64752825e+01,   3.01155728e+01,   2.33612213e-01,   
+           5.36751315e+01,   7.66603019e+01,   1.32822154e+02,   4.21999937e-01,   
+           4.47164325e+01,   6.99611650e+01,   1.81829413e+02,   5.69677738e-01,   
+           3.13267388e+01,   7.26107049e+01,   4.15825866e+01,   6.32949036e-01,
+           3.52155138e+01,   8.14328369e+01,   1.62254720e+02,   6.44182046e-01,   
+           4.24411911e+01,   8.28341003e+01,   5.99901012e+01,   7.44109603e-01]   
+    p = np.array(p12)
+
+    npar = 4
+    i = np.arange(0,ncomp)
+    i_n0   = 4 + i*npar
+    d_arcsec = 15.0
+
+    if (renormalize_to_surfdens):
+        p[i_n0] = p[i_n0] / d_arcsec**2
+
+    return fitdisk.nstar_multigauss(np.array(p), ra, dec, ncomp=ncomp)
+
+
+
+    
 
