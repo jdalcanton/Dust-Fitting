@@ -1,6 +1,6 @@
 ## to deal with display when running as background jobs
-from matplotlib import use
-use('Agg')
+#from matplotlib import use
+#use('Agg')
 import pyfits
 from numpy import *
 
@@ -15,9 +15,11 @@ import isolatelowAV as iAV
 from scipy import ndimage
 from scipy.stats import norm
 from scipy.ndimage import filters as filt
+import scipy.special as special
 import string
 import os.path as op
 import random as rnd
+import numpy as np
 
 # Principle: "rotate" to frame where all "colors" are along reddening
 # vector. Rotate the -data- into this frame, once. Rotate the original
@@ -282,7 +284,6 @@ def isolate_low_AV_color_mag(filename = '../../Data/12056_M31-B15-F09-IR_F110W_F
     print 'Narrow: Returning ', len(ikeep_narrow),' out of ',len(c),' stars from ',n_cstd_thresh,' bins.'
 
     return c[ikeep_blue], m[ikeep_blue], ikeep_blue, c[ikeep_narrow], m[ikeep_narrow], ikeep_narrow, cm, cstd
-
 
 
 def color_sigma_vs_mag(c, m, magrange=[18.5,24.0], nperbin=50):
@@ -917,7 +918,7 @@ class likelihoodobj(object):
 
 def run_one_brick(fileroot, datadir='../../Data/', results_extension='', 
                   deltapixorig = [0.025,0.2], d_arcsec = 6.64515,
-                  showplot='', nwalkers=50, nsamp=15, nburn=150):
+                  showplot='', nwalkers=50, nsamp=15, nburn=150, grab_ira_idec=[]):
     """
     For a given fits file, do all the necessary prep for running fits
     - read file
@@ -927,17 +928,18 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
       (using same color, mag range as data)
     - trim data to appropriate color, mag range (global CMD range + datamask)
     - grid data in ra-dec
+    - if grab_ira_idec = integer pair, save useful info for that pixel number (i_ra, i_dec)
     """
 
     # set up grid sizes, magnitude limits, etc
-    crange    = [0.3,2.5]        # range of colors to use in CMD fitting
+    crange    = [0.3,3.5]        # range of colors to use in CMD fitting
     maglimoff = [0.0, 0.25]      # shift 50% magnitude limits this much brighter
     #deltapixorig = [0.025,0.2]  # pixel_size in CMD color, magnitude
     mfitrange = [18.7,21.3]      # range for doing selection for "narrow" RGB
     #d_arcsec = 6.64515           # resolution of ra-dec grid for result (6.64515 = 25 pc at 776 kpc)
     floorfrac_value = 0.05       # define fraction of uniform "noise" to include in data model
     dr = 0.025                   # radius interval within which to do analyses
-    r_interval_range = [0.2, 1.8] # range over which to calculate foreground CMDs (clips bulge)
+    r_interval_range = [0.15, 1.8] # range over which to calculate foreground CMDs (clips bulge)
     nrgbstars = 3000             # target number of stars on upper RGB
     n_substeps = 6               # number of substeps before radial foreground CMDs are independent
     masksig = [2.5, 3.0]         # limits of data mask for clipping noise from foreground CMD
@@ -953,8 +955,8 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     savefile = '../Results/' + fileroot + results_extension + '.npz'
     pngfileroot = '../Results/' + fileroot + results_extension
     completenessdir = '../../Completeness/'
-    m110completenessfile = 'completeness_ra_dec.st.F110W.npz'
-    m160completenessfile = 'completeness_ra_dec.st.F160W.npz'
+    m110completenessfile = 'completeness_ra_dec.st.F110W.nstar.npz'
+    m160completenessfile = 'completeness_ra_dec.st.F160W.nstar.npz'
 
     # Define reddening parameters
 
@@ -992,7 +994,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     ra_local,  dec_local, ira, idec = extract_local_subgrid(ra_range, dec_range, 
                                                             ra_global, dec_global)
 
-    # Calculate radius at each ra-dec grid point
+    # Calculate radius and interpolated log10 of surface density at each ra-dec grid point
 
     ira, idec = indices([len(ra_local),len(dec_local)])
     ra_vec  = ra_local[ira]
@@ -1008,6 +1010,10 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     r_range = [nanmin(r_array), nanmax(r_array)]
     print 'Radial Fitting Range: ', r_range
 
+    lgnstar_array = np.log10(iAV.get_nstar_at_ra_dec(ra_cen_array, dec_cen_array))
+    lgnstar_range = [nanmin(lgnstar_array), nanmax(lgnstar_array)]
+    print 'Log10 Nstar density Fitting Range: ', lgnstar_range
+
     # Get range of magnitude limits to set CMD limits appropriately.
     # (i.e., tighten in to speed computation)
 
@@ -1019,8 +1025,8 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     p110 = poly1d(m110polyparam)
     p160 = poly1d(m160polyparam)
 
-    maglim110_array = p110(r_array) - maglimoff[0]
-    maglim160_array = p160(r_array) - maglimoff[1]
+    maglim110_array = p110(lgnstar_array) - maglimoff[0]
+    maglim160_array = p160(lgnstar_array) - maglimoff[1]
 
     m160brightlim = 18.5
     m110brightlim = m160brightlim + crange[0]
@@ -1047,13 +1053,13 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     # Initialize unreddened CMDs and noise models
 
     # limit the number of radial foreground CMDs to return to save space
-    dr_padding = 0.1
-    r_range_limit = [r_range[0]-dr_padding, r_range[1]+dr_padding]
+    dlgn_padding = 0.1
+    lgnstar_range_limit = [lgnstar_range[0]-dlgn_padding, lgnstar_range[1]+dlgn_padding]
     
     foreground_cmd_array, datamask_array, noise_array, noisefrac_vec, \
-        meanr_vec, rrange_array, meancolor_array, sigmacolor_array, \
+        meanlgnstar_vec, lgnstarrange_array, meancolor_array, sigmacolor_array, \
         n_per_cmd_vec, maglim_array, qmag_boundary, color_boundary = \
-        iAV.make_radial_low_AV_cmds(nrgbstars = nrgbstars, nsubstep=n_substeps, 
+        iAV.make_nstar_selected_low_AV_cmds(nrgbstars = nrgbstars, nsubstep=n_substeps, 
                                     mrange = m160range,
                                     crange = crange,
                                     deltapixorig = deltapixorig,
@@ -1064,16 +1070,17 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                                     usemask=True, masksig=masksig,
                                     makenoise=True, noisemasksig=noisemasksig,
                                     useq=True, reference_color=reference_color,
-                                    restricted_r_range=r_range_limit)
+                                    restricted_n_range=lgnstar_range_limit)
 
-    # set up boundaries of radial interval
-    # i.e., for r_interval[i] < r < r_interval[i+1], use foreground_cmd_array[i].
+    # set up boundaries of lgNstar density interval
+    # i.e., for lgnstar_interval[i] < lgnstar < lgnstar_interval[i+1], use foreground_cmd_array[i].
 
-    r_intervals = array([(meanr_vec[i] + meanr_vec[i+1])/2.0 for i in range(len(meanr_vec)-1)])
-    max_rrange = nanmax(rrange_array)
-    max_brickr = nanmax(r_range_limit)
-    max_r = maximum(max_rrange, max_brickr)
-    r_intervals = append([0], r_intervals, max_r)
+    lgnstar_intervals = array([(meanlgnstar_vec[i] + meanlgnstar_vec[i+1])/2.0 
+                               for i in range(len(meanlgnstar_vec)-1)])
+    max_lgnstarrange = nanmax(lgnstarrange_array)
+    max_bricklgn = nanmax(lgnstar_range_limit)
+    max_lgnstar = maximum(max_lgnstarrange, max_bricklgn)
+    lgnstar_intervals = append([0], lgnstar_intervals, max_lgnstar)
 
     # bin data into ra-dec
 
@@ -1092,35 +1099,35 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     output_map = zeros([nx,ny])
 
 
-    # Loop through all possible r values
+    # Loop through all possible lgnstar values
     # Try implementing with python map()
 
-    for i_r in range(len(r_intervals) - 1):
+    for i_lgn in range(len(lgnstar_intervals) - 1):
 
-        # only analyze a radial range if some of the r-interval is
+        # only analyze a radial range if some of the lgnstar-interval is
         # covered by the brick
-        if (((r_intervals[i_r]   >= r_range[0]) & 
-             (r_intervals[i_r]   <= r_range[1])) | 
-            ((r_intervals[i_r+1] >= r_range[0]) & 
-             (r_intervals[i_r+1] <= r_range[1]))) :
+        if (((lgnstar_intervals[i_lgn]   >= lgnstar_range[0]) & 
+             (lgnstar_intervals[i_lgn]   <= lgnstar_range[1])) | 
+            ((lgnstar_intervals[i_lgn+1] >= lgnstar_range[0]) & 
+             (lgnstar_intervals[i_lgn+1] <= lgnstar_range[1]))) :
 
             # get ra-dec pixels in the appropriate radial range
         
-            i_ra, i_dec = where((r_array > r_intervals[i_r]) & 
-                                (r_array <= r_intervals[i_r + 1]))
+            i_ra, i_dec = where((lgnstar_array > lgnstar_intervals[i_lgn]) & 
+                                (lgnstar_array <= lgnstar_intervals[i_lgn + 1]))
             
-            print 'Fitting ',len(i_ra),' pixels in radial range ', \
-                round(r_intervals[i_r],2), round(r_intervals[i_r+1],2), \
-                ' Pix Fraction: ', round(float(len(i_ra)) / float(len(r_array)), 3)
+            print 'Fitting ',len(i_ra),' pixels in lgn range ', \
+                round(lgnstar_intervals[i_lgn],2), round(lgnstar_intervals[i_lgn+1],2), \
+                ' Pix Fraction: ', round(float(len(i_ra)) / float(len(lgnstar_array)), 3)
 
-            output_map[i_ra,i_dec] = meanr_vec[i_r]
+            output_map[i_ra,i_dec] = meanlgnstar_vec[i_lgn]
             
             # Set up datamask, foreground CMD, and noise model for r-interval
     
-            fg_cmd = foreground_cmd_array[:, :, i_r]
-            datamask = datamask_array[:, :, i_r]
-            noise_model = noise_array[:, :, i_r]
-            noise_frac = noisefrac_vec[i_r]
+            fg_cmd = foreground_cmd_array[:, :, i_lgn]
+            datamask = datamask_array[:, :, i_lgn]
+            noise_model = noise_array[:, :, i_lgn]
+            noise_frac = noisefrac_vec[i_lgn]
 
             # normalize models
 
@@ -1156,8 +1163,8 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
 
             # get magnitude limits of interval
         
-            maglim110 = maglim_array[0, i_r]
-            maglim160 = maglim_array[1, i_r]
+            maglim110 = maglim_array[0, i_lgn]
+            maglim160 = maglim_array[1, i_lgn]
 
             # set up function for likelihood fitting
 
@@ -1165,7 +1172,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                                      color_boundary, qmag_boundary, 
                                      noise_frac, floorfrac_value)
 
-            # loop through pixels in the radial bin, fitting for parameters
+            # loop through pixels in the lgnstar density bin, fitting for parameters
 
             for i_pix in range(len(i_ra)):
 
@@ -1173,6 +1180,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                 nstar_1 = len(i_stars)
                 nstar   = len(i_stars)
 
+                trypix = True
                 if nstar_1 > n_fit_min: 
 
                     i_c, i_q = get_star_indices(c[i_stars], q[i_stars], 
@@ -1198,7 +1206,17 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
 
                 # If there are still enough stars, do fit.
 
-                if nstar > n_fit_min: 
+                if (len(grab_ira_idec) == 2): 
+                    save_single_pix = True
+                    trypix = False
+                    if ((i_ra[i_pix] == grab_ira_idec[0]) & (i_dec[i_pix] == grab_ira_idec[1])):
+                        print 'Saving pixel number ', i_ra[i_pix], ' ', i_dec[i_pix]
+                        trypix = True
+
+                #if nstar > n_fit_min: 
+                if ((nstar > n_fit_min) & trypix):
+
+                    nsamp = 75
 
                     #plt.plot(i_c,i_q,',',color='red')
                     #plt.draw()
@@ -1226,6 +1244,81 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                     x = percentile_values[i_ra[i_pix], i_dec[i_pix], 0:3]
                     f = (exp(x) / (1.0 + exp(x)))**(1./alpha)
                     percentile_values[i_ra[i_pix], i_dec[i_pix], 0:3] = f
+
+                    # calculate mean and fractions above various thresholds
+                    xvec = d['x']
+                    Amedvec = d['A_V']
+                    wvec = d['w']
+                    fredvec = (exp(xvec) / (1.0 + exp(xvec)))**(1./alpha)
+                    sigma_squaredvec = log((1. + sqrt(1. + 4. * (wvec)**2)) / 2.)
+                    sigmavec = sqrt(sigma_squaredvec)
+                    meanAVvec = Amedvec * np.exp(sigma_squaredvec / 2.0)
+                    AVthreshvals = [0.1, 0.5, 0.8, 0.9, 1.0, 5.0, 7.0]
+                    fdensevals = np.zeros((len(xvec),len(AVthreshvals)))
+                    percval = [16, 60, 84]
+                    fdenseval_01 = 0.5*special.erfc(np.log(AVthreshvals[0]/Amedvec) / 
+                                                      (np.sqrt(2)*sigmavec))
+                    fdenseval_05 = 0.5*special.erfc(np.log(AVthreshvals[1]/Amedvec) / 
+                                                      (np.sqrt(2)*sigmavec))
+                    fdenseval_08 = 0.5*special.erfc(np.log(AVthreshvals[2]/Amedvec) / 
+                                                      (np.sqrt(2)*sigmavec))
+                    fdenseval_09 = 0.5*special.erfc(np.log(AVthreshvals[3]/Amedvec) / 
+                                                      (np.sqrt(2)*sigmavec))
+                    fdenseval_1 = 0.5*special.erfc(np.log(AVthreshvals[3]/Amedvec) / 
+                                                      (np.sqrt(2)*sigmavec))
+                    fdenseval_5 = 0.5*special.erfc(np.log(AVthreshvals[4]/Amedvec) / 
+                                                      (np.sqrt(2)*sigmavec))
+                    fdenseval_7 = 0.5*special.erfc(np.log(AVthreshvals[5]/Amedvec) / 
+                                                      (np.sqrt(2)*sigmavec))
+                    names = ['sigmavec', 'meanAVvec',
+                             'fdenseval_01', 'fdenseval_05', 'fdenseval_08', 'fdenseval_09',
+                             'fdenseval_1', 'fdenseval_5', 'fdenseval_7']
+                    d_derived = {'sigmavec': sigmavec, 'meanAVvec': meanAVvec, 
+                                 'fdenseval_01': fdenseval_01, 
+                                 'fdenseval_05': fdenseval_05, 'fdenseval_08': fdenseval_08, 
+                                 'fdenseval_09': fdenseval_09, 'fdenseval_1': fdenseval_1, 
+                                 'fdenseval_5': fdenseval_5, 'fdenseval_7': fdenseval_7,
+                                 'AVthreshvals': AVthreshvals}
+                    percentile_derived = array([percentile(d_derived[names[k]], percval) 
+                                                for k in range(len(names))])
+
+                    if (save_single_pix): 
+                        fake_cmd = makefakecmd(fg_cmd, color_boundary, qmag_boundary,
+                                               [bestfit[0], bestfit[1], bestfit[2], 0.20443, 
+                                                (0.33669 - 0.20443)], 
+                                               floorfrac=floorfrac_value, 
+                                               mask=datamask, SHOWPLOT=False,
+                                               noise_model = noise_model,
+                                               noise_frac = noise_frac)
+
+                        demosavefile = 'demo_modelfit_data_' + str(i_ra[i_pix]) + '_' +    \
+                            str(i_dec[i_pix]) + '.npz'
+                        print 'Saving demo data to ', demosavefile
+                        savez(demosavefile, 
+                              d_derived = d_derived,
+                              percentile_derived = percentile_derived, 
+                              #samp = samp,    # python doesn't know how to pickle this class
+                              d = d, 
+                              bestfit = bestfit, 
+                              sigmavec = sigmavec,
+                              i_c = i_c, 
+                              i_q = i_q, 
+                              fg_cmd = fg_cmd, 
+                              fake_cmd = fake_cmd, 
+                              color_boundary = color_boundary, 
+                              qmag_boundary = qmag_boundary,
+                              AVthreshvals = AVthreshvals,
+                              datafile = datafile,
+                              d_arcsec = d_arcsec,
+                              deltapixorig = deltapixorig,
+                              i_pix = i_pix,
+                              i_ra = i_ra[i_pix], 
+                              i_dec = i_dec[i_pix],
+                              alpha = alpha,
+                              frac_red_mean = frac_red_mean)
+                        
+                        return d_derived, percentile_derived, samp, d, bestfit, sigmavec, \
+                            i_c, i_q, fg_cmd, fake_cmd
                 
                     ## if requested, plot results
 
@@ -1269,7 +1362,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
 
         else:
 
-            print 'Skipping r_annulus: ', i_r
+            print 'Skipping lgnstar_annulus: ', i_lgn
 
     # Record results to file
 
@@ -2036,16 +2129,16 @@ def show_model_examples():
 
     plt.draw()
 
-#  set up to allow calls from the shell with arguments
-import sys
-#
-if __name__ == '__main__':
-  datafile = sys.argv[1]
-  deltapixorig = [float(sys.argv[2]), float(sys.argv[3])]
-  d_arcsec = float(sys.argv[4])
-  results_extension=sys.argv[5]
-  print 'Datafile: ', datafile
-  print 'deltapixorig: ', deltapixorig
-  print 'd_arcsec: ', d_arcsec
-  print 'results_extension', results_extension
-  bfarray, percarray = run_one_brick(datafile, deltapixorig=deltapixorig, d_arcsec=d_arcsec, results_extension=results_extension, datadir='/mnt/angst4/dstn/v8/', showplot='')
+##  set up to allow calls from the shell with arguments
+#import sys
+##
+#if __name__ == '__main__':
+#  datafile = sys.argv[1]
+#  deltapixorig = [float(sys.argv[2]), float(sys.argv[3])]
+#  d_arcsec = float(sys.argv[4])
+#  results_extension=sys.argv[5]
+#  print 'Datafile: ', datafile
+#  print 'deltapixorig: ', deltapixorig
+#  print 'd_arcsec: ', d_arcsec
+#  print 'results_extension', results_extension
+#  bfarray, percarray = run_one_brick(datafile, deltapixorig=deltapixorig, d_arcsec=d_arcsec, results_extension=results_extension, datadir='/mnt/angst4/dstn/v8/', showplot='')

@@ -526,9 +526,8 @@ def make_all_isolate_AV_for_noise_model():
 
     return
 
-def read_allbricks():
+def read_allbricks(resultsdir = '../Unreddened/'):
 
-    resultsdir = '../Unreddened/'
     fileroot = resultsdir + 'allbricks'
     savefilename = fileroot + '.npz'
     dat = np.load(savefilename)
@@ -584,14 +583,20 @@ def return_ra_dec_for_radius(r):
     
 def plot_allbricks_ra_dec(saveplots = True):
 
-    resultsdir = '../Unreddened/'
+    resultsdir = '../Unreddened/FourthRun15arcsec/'
     fileroot = resultsdir + 'allbricks'
+    savefilename = fileroot + '.npz'
+    newsavefilename = fileroot + '.clean.npz'
     
     rplot_vec = [0.25, 0.55, 1.05]
 
     ra, dec, r, cstd, cm, cmed, nstar, \
         ragrid, decgrid, rgrid, cstdgrid, cmgrid, cmedgrid, nstargrid \
-        = read_allbricks()
+        = read_allbricks(resultsdir = resultsdir)
+
+    nstarmodelgrid = get_nstar_at_ra_dec(ragrid, decgrid, renormalize_to_surfdens=True)
+    print ra.shape
+    print nstarmodelgrid.shape
 
     # add random offset to nstar to blur points (OBSOLETE AFTER SWITCHING TO SURFACE DENSITY)
     #nstargrid_blur = nstargrid + np.random.uniform(-0.5, 0.5, nstargrid.shape)
@@ -648,10 +653,6 @@ def plot_allbricks_ra_dec(saveplots = True):
     # save data from low extinction regions to file
     # save clean data to a new file
 
-    resultsdir = '../Unreddened/'
-    fileroot = resultsdir + 'allbricks'
-    savefilename = fileroot + '.npz'
-    newsavefilename = fileroot + '.clean.npz'
     print 'Saving clean data to ', newsavefilename
     
     dat = np.load(savefilename)
@@ -943,6 +944,24 @@ def plot_allbricks_ra_dec(saveplots = True):
         plotfilename = fileroot + '.lognstar_position.png'
         plt.savefig(plotfilename, bbox_inches=0)
 
+    plt.figure(22)
+    plt.clf()
+    im = plt.scatter(ragrid, decgrid, c=np.log10(nstarmodelgrid), s=s_size, 
+                     linewidth=0, cmap='gist_ncar', alpha=0.5, vmin=-1.2, vmax=np.log10(3.0))
+    color_bar = plt.colorbar(im)
+    color_bar.set_alpha(1)
+    color_bar.draw_all()
+    plt.axis([12., 10.5, 41.1, 42.4])
+    plt.xlabel('RA')
+    plt.ylabel('Dec')
+    plt.title('Model Log$_{10} \Sigma_{stars}$  (arcsec$^{-2}$)')
+    for rval in rplot_vec:
+        raell, decell = return_ra_dec_for_radius(rval)
+        plt.plot(raell, decell, color='black', linewidth=2, linestyle='-')
+    if (saveplots): 
+        plotfilename = fileroot + '.lognstarmodel_position.png'
+        plt.savefig(plotfilename, bbox_inches=0)
+
     plt.figure(14)
     plt.clf()
     im = plt.scatter(cstdgrid, cmgrid, c=rgrid, s=3, 
@@ -1215,8 +1234,14 @@ def make_low_AV_cmd(c, m,
 
     nbins = [int((mrange[1] - mrange[0]) / deltapix[1]),
              int((crange[1] - crange[0]) / deltapix[0])]
-    cmd, mboundary, cboundary = np.histogram2d(m, c,
+    if (len(c) > 0): 
+        cmd, mboundary, cboundary = np.histogram2d(m, c,
                                                range=[np.sort(mrange), crange], bins=nbins)
+    else:
+        # use dummy values to force an empty grid to return
+        cmd, mboundary, cboundary = np.histogram2d([0], [0],
+                                               range=[np.sort(mrange), crange], bins=nbins)
+        
 
     deltapix =  [cboundary[1]-cboundary[0],mboundary[1]-mboundary[0]]
     extent = [cboundary[0], cboundary[-1],
@@ -1550,7 +1575,6 @@ def make_radial_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
             meanr_array, rrange_array, meancol_array, sigcol_array, \
             n_array, maglim_array, mboundary, cboundary
 
-
 def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3., 
                             mrange = [18.2, 25.],
                             crange = [0.3, 2.5],
@@ -1674,7 +1698,7 @@ def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
     mask_array = np.zeros([cmd.shape[0], cmd.shape[1], nnstarbins])
     meancol_array = np.zeros([meancol.shape[0], nnstarbins])
     sigcol_array = np.zeros([sigcol.shape[0], nnstarbins])
-    meannstar_array = np.zeros(nnstarbins)
+    meanlgnstar_array = np.zeros(nnstarbins)
     nstarrange_array = np.zeros([2,nnstarbins])
     num_per_cmd_array = np.zeros(nnstarbins)
     maglim_array = np.zeros([2,nnstarbins])
@@ -1726,14 +1750,14 @@ def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
         cmd_array[:,:,i] = cmd
         meancol_array[:,i] = cinterp(meancol)
         sigcol_array[:,i] = sigcol * deltapix[0]
-        meannstar_array[i] = np.average(nstar[nnstarlo[i]:nnstarhi[i]])
+        meanlgnstar_array[i] = np.average(nstar[nnstarlo[i]:nnstarhi[i]])
         nstarrange_array[:,i] = [nstar[nnstarlo[i]], nstar[nnstarhi[i]]]
         num_per_cmd_array[i] = len(nstar[nnstarlo[i]:nnstarhi[i]])
 
         # calculate corresponding magnitude limits
 
-        maglim110 = p110(meannstar_array[i]) - maglimoff[0]
-        maglim160 = p160(meannstar_array[i]) - maglimoff[1]
+        maglim110 = p110(meanlgnstar_array[i]) - maglimoff[0]
+        maglim160 = p160(meanlgnstar_array[i]) - maglimoff[1]
         maglim_array[:,i] = np.array([maglim110, maglim160])
 
         m110range = [16.0, maglim110]
@@ -1763,13 +1787,13 @@ def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
 
         mask_array[:,:,i] = color_mag_datamask
 
-        print 'Bin: ', i, '  logN: ', ("%g" % round(meannstar_array[i],3)), 'maglim', ("%g" % round(maglim110,2)), ("%g" % round(maglim160,2)),' Nstars_Per_Cmd: ',nstars_per_cmd, ' NRGB: ',norm
+        print 'Bin: ', i, '  logN: ', ("%g" % round(meanlgnstar_array[i],3)), 'maglim', ("%g" % round(maglim110,2)), ("%g" % round(maglim160,2)),' Nstars_Per_Cmd: ',nstars_per_cmd, ' NRGB: ',norm
 
         #plt.imshow(cmd,  extent=extent, aspect='auto', interpolation='nearest', vmin=0, vmax = 0.1)
         plt.imshow(0.01*color_mag_datamask + cmd,  extent=extent, aspect='auto', interpolation='nearest', vmin=0, vmax = 0.1)
         plt.xlabel('F110W - F160W')
         plt.ylabel('F160W')
-        plt.title('Log$_{10}$ N$_{star}$: '+ ("%g" % np.round(meannstar_array[i],3)) + 
+        plt.title('Log$_{10}$ N$_{star}$: '+ ("%g" % np.round(meanlgnstar_array[i],3)) + 
                   '  F160W 50% Completeness: ' + ("%g" % np.round(maglim160,2)))
         plt.draw()
 
@@ -1867,7 +1891,7 @@ def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
                        interpolation='nearest', vmin=0, vmax=0.1)
             plt.xlabel('F110W - F160W')
             plt.ylabel('F160W')
-            plt.title('Log$_{10} N_{star}$: '+ ("%g" % np.round(meannstar_array[i],3)) + 
+            plt.title('Log$_{10} N_{star}$: '+ ("%g" % np.round(meanlgnstar_array[i],3)) + 
                       '  F160W 50% Completeness: ' + ("%g" % np.round(maglim160,2)))
             plt.draw()
 
@@ -1875,23 +1899,23 @@ def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
 
         print 'Trimming down to restricted nstar range: ', restricted_n_range
         # fix limits of restricted_n_range
-        restricted_n_range = [np.maximum(restricted_n_range[0],np.min(meannstar_array)),
-                              np.minimum(restricted_n_range[1],np.max(meannstar_array))]
-        i_nstarinterp  = interp1d(meannstar_array, np.arange(len(meannstar_array)))
+        restricted_n_range = [np.maximum(restricted_n_range[0],np.min(meanlgnstar_array)),
+                              np.minimum(restricted_n_range[1],np.max(meanlgnstar_array))]
+        i_nstarinterp  = interp1d(meanlgnstar_array, np.arange(len(meanlgnstar_array)))
         i = i_nstarinterp(restricted_n_range)
         ilo = np.maximum(int(np.floor(i[0])), 0)
-        ihi = np.minimum(int(np.ceil(i[1]) + 1), len(meannstar_array))
+        ihi = np.minimum(int(np.ceil(i[1]) + 1), len(meanlgnstar_array))
         print 'Grabbing index range: ', [ilo, ihi]
         return cmd_array[:,:,ilo:ihi], mask_array[:,:,ilo:ihi], \
             noise_array[:,:,ilo:ihi], noisefrac_array[ilo:ihi], \
-            meannstar_array[ilo:ihi], nstarrange_array[:,ilo:ihi], \
+            meanlgnstar_array[ilo:ihi], nstarrange_array[:,ilo:ihi], \
             meancol_array[:,ilo:ihi], sigcol_array[:,ilo:ihi], \
             num_per_cmd_array[ilo:ihi], maglim_array[:,ilo:ihi], mboundary, cboundary
     
     else:
 
         return cmd_array, mask_array, noise_array, noisefrac_array, \
-            meannstar_array, nstarrange_array, meancol_array, sigcol_array, \
+            meanlgnstar_array, nstarrange_array, meancol_array, sigcol_array, \
             num_per_cmd_array, maglim_array, mboundary, cboundary
 
 def plot_RGB_locii(plotfileroot='../Unreddened/lowAV_RGB'):

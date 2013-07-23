@@ -10,6 +10,7 @@ import read_brick_data as rbd
 import makefakecmd as mfc
 import isolatelowAV as iAV
 from scipy.ndimage import filters as filt
+import scipy.special as special
 from random import sample
 import ezfig  # morgan's plotting code
 import pyfits as pyfits
@@ -1490,10 +1491,204 @@ def plot_cumulative_log_normal():
 
     return
 
+def plot_pixel_demo(fileroot = 'demo_modelfit_data_7_63'):
+
+    # plot example of fitting for an individual pixel
+
+    dat = np.load(fileroot + '.npz')  # brick 15
+    fg_cmd = dat['fg_cmd']
+    fake_cmd = dat['fake_cmd']
+    color_boundary = dat['color_boundary']
+    qmag_boundary = dat['qmag_boundary']
+    d_derived = dat['d_derived'].tolist()
+    d = dat['d'].tolist()
+    #print d_derived
+    #print d
+    #print d['A_V']
+    bestfit = dat['bestfit']
+    frac_red_mean = 0.4
+    x = bestfit[0]
+    alpha = np.log(0.5) / np.log(frac_red_mean)
+    f = (np.exp(x) / (1.0 + np.exp(x)))**(1./alpha)
+    sigma_squared = np.log((1. + np.sqrt(1. + 4. * (bestfit[2])**2)) / 2.)
+    sigma = np.sqrt(sigma_squared)
+    i_c = dat['i_c']
+    i_q = dat['i_q']
+    crange = [min(color_boundary), max(color_boundary)]
+    qrange = [min(qmag_boundary), max(qmag_boundary)]
+    AVvec = d['A_V']
+    sigmavec = np.sqrt(np.log((1. + np.sqrt(1. + 4. * (d['w'])**2)) / 2.))
+    sigmavec = d_derived['sigmavec']
+    fvec = (np.exp(d['x']) / (1.0 + np.exp(d['x'])))**(1./alpha)
+    meanAVvec = d_derived['meanAVvec']
+    fdensevec = d_derived['fdenseval_1']
+    fsfvec = d_derived['fdenseval_5']
+
+    cinterp = interp.interp1d(np.arange(len(color_boundary)), color_boundary)
+    qinterp = interp.interp1d(np.arange(len(qmag_boundary)), qmag_boundary)
+    c = cinterp(i_c + 0.5)
+    q = qinterp(i_q + 0.5)
+
+    # plot image of unreddened model 
+
+    plt.figure(1)
+    plt.clf()
+    plt.imshow(dat['fg_cmd'],extent=[crange[0],crange[1],qrange[1],qrange[0]], 
+               origin='upper',aspect='auto', interpolation='nearest', cmap='gist_heat_r')
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('Extinction Corrected F160W')
+    plt.savefig(fileroot + '_unreddened.png')
+    
+    # plot image of unreddened model 
+
+    plt.figure(2)
+    plt.clf()
+    plt.imshow(dat['fg_cmd'],extent=[crange[0],crange[1],qrange[1],qrange[0]], 
+               origin='upper',aspect='auto', interpolation='nearest', cmap='gist_heat_r')
+    plt.plot(c, q, '*', color='blue', linewidth=0, ms=12)
+    plt.axis([crange[0],crange[1],qrange[1],qrange[0]])
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('Extinction Corrected F160W')
+    plt.savefig(fileroot + '_unreddened_w_data.png')
+    
+    # plot image of reddened model
+
+    plt.figure(3)
+    plt.clf()
+    plt.imshow(fake_cmd,extent=[crange[0],crange[1],qrange[1],qrange[0]], 
+               origin='upper',aspect='auto', interpolation='nearest', cmap='gist_heat_r')
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('Extinction Corrected F160W')
+    plt.savefig(fileroot + '_reddened.png')
+    
+    # plot image of reddened model + data
+
+    plt.figure(4)
+    plt.clf()
+    p1 = plt.imshow(fake_cmd,extent=[crange[0],crange[1],qrange[1],qrange[0]], 
+               origin='upper',aspect='auto', interpolation='nearest', cmap='gist_heat_r')
+    plt.plot(c, q, '*', color='blue', linewidth=0, ms=12)
+    plt.axis([crange[0],crange[1],qrange[1],qrange[0]])
+    plt.xlabel('F110W - F160W')
+    plt.ylabel('Extinction Corrected F160W')
+    plt.annotate(r'$A_{V,median} = %4.2f$' % bestfit[1], xy=(2.4, 19.5), fontsize=17,horizontalalignment='right')
+    plt.annotate(r'$\sigma = %4.2f$' % sigma, xy=(2.4, 20.0), fontsize=17,horizontalalignment='right')
+    plt.annotate(r'$f_{reddened} = %4.2f$' % f, xy=(2.4, 20.5), fontsize=17,horizontalalignment='right')
+    plt.savefig(fileroot + '_reddened_w_data.png')
+
+    # plot banana diagrams
+    
+    plt.figure(5)
+    plt.clf()
+    plt.plot(AVvec, fvec, ',', alpha=0.2, c='b')
+    plt.axis([0, 4, 0, 1])
+    plt.xlabel('Median $A_V$')
+    plt.ylabel('$f_{reddened}$')
+    plt.savefig(fileroot + '_AV_fred.png')
 
     
-
-
+    plt.figure(6)
+    plt.clf()
+    plt.plot(meanAVvec, sigmavec, ',', alpha=0.2, c='b')
+    plt.axis([0, 4, 0, 1])
+    plt.xlabel('Mean $A_V$')
+    plt.ylabel('$\sigma$')
+    plt.savefig(fileroot + '_AV_sigma.png')
     
+    plt.figure(7)
+    plt.clf()
+    plt.plot(meanAVvec, fdensevec, ',', alpha=0.2, c='b')
+    plt.axis([0, 4, 0, 1])
+    plt.xlabel('Mean $A_V$')
+    plt.ylabel(r"$f(A_V > 1)$")
+    plt.savefig(fileroot + '_AV_fAV_gt_1.png')
+    
+    plt.figure(8)
+    plt.clf()
+    plt.plot(meanAVvec, fsfvec, ',', alpha=0.2, c='b')
+    plt.axis([0, 4, 0, 1])
+    plt.xlabel('Mean $A_V$')
+    plt.ylabel(r"$f(A_V > 5)$")
+    plt.savefig(fileroot + '_AV_fAV_gt_5.png')
 
+    return
+
+def plot_dense_gas(filename='merged.npz', resultsdir='../Results/', AKthresh=0.1):
+
+    AVthresh = AKthresh / 0.11613
+    print 'Using A_V threshold of ', AVthresh
+    d_arcsec = 6.64515
+    pc_per_arcsec = 3.762
+    msun_per_pc_per_meanAV = 20.903   # Rieke et al 1985
+
+    avdat = np.load(resultsdir + filename)
+
+    AV = avdat['bestfit_values_clean'][:,:,1]
+    stddev_over_AV = avdat['bestfit_values_clean'][:,:,2]
+    ###  NOTE!!! Incorrect -- compensates for error in runs 1-3!!!!
+    sig = np.log((1. + np.sqrt(1. + 4. * (stddev_over_AV)**2)) / 2.)
+    AVmean = AV * np.exp(sig**2 / 2.0)
+    fred = avdat['bestfit_values_clean'][:,:,0]
+    fdense = 0.5*special.erfc(np.log(AVthresh/AV) / 
+                              (np.sqrt(2)*sig))
+    gasmass_per_pix = AVmean * msun_per_pc_per_meanAV * (d_arcsec * pc_per_arcsec)**2
+    densegasmass_per_pix = gasmass_per_pix * fdense
+
+    ra_bins = avdat['ra_bins']
+    dec_bins = avdat['dec_bins']
+    racenvec  = (ra_bins[0:-2]  +  ra_bins[1:-1]) / 2.0
+    deccenvec = (dec_bins[0:-2] + dec_bins[1:-1]) / 2.0
+    #ra_AV, dec_AV = np.meshgrid(racenvec, deccenvec)
+    dec_AV, ra_AV = np.meshgrid(deccenvec, racenvec)
+
+    #make_fits_image(resultsdir + 'merged_gasmass.fits',gasmass_per_pix, ra_bins, dec_bins)
+    #make_fits_image(resultsdir + 'merged_densegas_AK0.8.fits',densegasmass_per_pix, ra_bins, dec_bins)
+    #make_fits_image(resultsdir + 'merged_sigmalgnorm.fits',sig, ra_bins, dec_bins)
+
+    #plt.figure(10)
+    #plt.plot(AV,fdense,',')
+
+    #plt.figure(11)
+    #plt.plot(AV,gasmass_per_pix,',')
+    #plt.axis([0,10,0,1e5])
+
+    plt.figure(1)
+    plt.clf()
+    plt.imshow(AVmean[::-1,::-1].T,cmap='hot', vmin=0, vmax=4)
+
+    plt.figure(2)
+    plt.clf()
+    plt.imshow(fred[::-1,::-1].T,cmap='hot', vmin=0, vmax=1)
+
+    plt.figure(3)
+    plt.clf()
+    im = plt.imshow(sig[::-1,::-1].T,cmap='hot', vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.savefig(resultsdir + 'merged_sigmalgnorm.png')
+
+    plt.figure(4)
+    plt.clf()
+    print np.min(fdense), np.max(fdense)
+    plt.imshow(fdense[::-1,::-1].T,cmap='hot_r', vmin=0, vmax=0.5)
+
+    plt.figure(5)
+    plt.clf()
+    print np.min(densegasmass_per_pix), np.max(densegasmass_per_pix)
+    plt.imshow(densegasmass_per_pix[::-1,::-1].T,cmap='hot_r', vmin=0, vmax=1e4)
+    
+    #plt.figure(6)
+    #plt.clf()
+    #plt.plot(AVmean, sig, ',', c='blue', alpha=0.3)
+    #plt.axis([0, 7, 0, 1])
+    #plt.xlabel('Mean $A_V$')
+    #plt.ylabel('$\sigma$')
+
+    plt.figure(7)
+    plt.clf()
+    iAVgood = np.where(AVmean > 0)
+    AVbins = np.linspace(0.01,10.0,100)
+    lgAVbins = np.log10(np.linspace(0,10.0,100))
+    plt.hist(AVmean[iAVgood],bins=lgAVbins, log=True)
+
+    return
 
