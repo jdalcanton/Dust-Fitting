@@ -492,10 +492,12 @@ def makefakecmd(fg_cmd, cvec, mvec, AVparam, floorfrac=0.0,
     alpha = log(0.5) / log(frac_red_mean)
     fracred = (exp(AVparam[0]) / (1. + exp(AVparam[0])))**(1./alpha) # x = ln(f/(1-f))
     medianAV = AVparam[1]
-    stddev = AVparam[2] * medianAV
-    #stddev = AVparam[2]
-    sigma_squared = log((1. + sqrt(1. + 4. * (stddev/medianAV)**2)) / 2.)
-    sigma = sqrt(sigma_squared)
+    #stddev = AVparam[2] * medianAV
+    #sigma_squared = log((1. + sqrt(1. + 4. * (stddev/medianAV)**2)) / 2.)
+    #sigma = sqrt(sigma_squared)
+    sigma = AVparam[2]
+    stddev_squared = (exp(sigma**2)-1.0)*exp(sigma**2)*(medianAV**2)
+    stddev = sqrt(stddev_squared)
     Amag_AV = AVparam[3]
     Acol_AV = AVparam[4]
     
@@ -1413,7 +1415,7 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
     percentile_values = zeros([nx, ny, nz_sigma])
     quality_values = zeros([nx, ny, nz_quality])
 
-    param_init = [-0.05, 0.5, 0.2]  # starting at x=0 locks in, because random*0 = 0
+    param_init = [-0.05, 0.5, 0.4]  # starting at x=0 locks in, because random*0 = 0
     #param_init = [0.5, 0.5, 0.2]   # use for f fitting
 
     if ra_bin_num == '':
@@ -1621,62 +1623,39 @@ def ln_priors(p, return_prior_parameters=False):
     
     # set up ranges
 
-    p0 = [-2.5, 2.5]           # x = ln(f/(1-f)) where fracred -- red fraction
-    #p0 = [0.05, 0.95]         # fracred -- red fraction
-    p1 = [0.0001, 8.0]         # median A_V
-    p2 = [0.01, 3.0]           # sigma_A/A_V (lognormal stddev / median)
+    p0 = [-3.0, 3.0]           # x = ln(f/(1-f)) where fracred -- red fraction
+    p1 = [0.0001, 10.0]         # median A_V
+    p2 = [0.01, 1.5]           # sigma
                               
-    # set up gaussians
+    # set up gaussian for x
     p0mean = 0.0              # symmetric in x means mean of f=0.5
     p0stddev = 1.0
-    #p0stddev = 0.75
     p0alpha = 0.0             # for implementing skew normal prior....
-    #p0mean = 0.5              # f=0.5 when not much other information
-    #p0stddev = 0.25
 
-    #AV_pix = deltapix_approx[0] / Acol_AV
-    #p1mean = 0.5 * AV_pix     # drive to low A_V if not much information
-    #p1stddev = 8.0            #  ...but, keep it wide so little influence
-
-    p2mean = 1.0              # w = broad gaussian 
-    #p2stddev = p2[1] - p2mean
-    p2stddev = 0.5
-    p2stddev = 1.0
-    #p2mean = AV_pix              # sigma_A
-    #p2stddev = p2[1] - p2mean
-
-    # set up boundary on bad fits on sigma/A_V vs A_V plane
-    #bad_slope = -0.45
-    #bad_intercept = 0.45
+    # set up log normal for sigma, keeping same mode
+    p2mode = 1.0              # w = broad gaussian 
+    p2sigma = 0.5
+    p2mu = np.log(p2mode) + p2sigma**2
 
     if return_prior_parameters:
 
         return {'p0': p0, 'p1': p1, 'p2': p2, 
                 'p0mean': p0mean, 'p0stddev': p0stddev, 'p0alpha': p0alpha,
-                'p0mean': p2mean, 'p1stddev': p2stddev}
+                'p2mode': p2mode, 'p2sigma': p2sigma,   'p2mu': p2mu}
 
     else: 
 
-        # return -Inf if the parameters are out of range
-        #if ((p0[0] > p[0]) | (p[0] > p0[1]) | 
-        #    (p1[0] > p[1]) | (p[1] > p1[1]) | 
-        #    (p2[0] > p[2]) | (p[2] > p2[1]) |
-        #    (p[2] < bad_intercept + bad_slope * p[1])) :
-        #    return -Inf
         if ((p0[0] > p[0]) | (p[0] > p0[1]) | 
             (p1[0] > p[1]) | (p[1] > p1[1]) | 
             (p2[0] > p[2]) | (p[2] > p2[1])):
             return -Inf
 
         # if all parameters are in range, return the ln of the Gaussian 
-        # (for a Gaussian prior)
+        # (for a Gaussian prior on x) and the ln of the log normal prior
+        # on sigma (p[2])
         lnp = 0.0000001
         lnp += -0.5 * (p[0] - p0mean) ** 2 / p0stddev**2
-        #lnp += -0.5 * (p[1] - p1mean) ** 2 / p1stddev**2
-        lnp += -0.5 * (p[2] - p2mean) ** 2 / p2stddev**2
-
-        #if (p0alpha != 0):  # add skewness to prior on x -- use if mean(f) != 0.5
-        #    lnp += log(2.0*norm.cdf(p0alpha * (p[0] - p0mean) / p0stddev))
+        lnp += - np.log(p[2]) - 0.5 * (np.log(p[2]) - p2mu) ** 2 / p2sigma**2
 
         return lnp
 
@@ -1691,7 +1670,7 @@ def ln_prob(param, i_star_color, i_star_magnitude):
     return lnp + cmdlikelihoodfunc(param, i_star_color, i_star_magnitude)
     
 
-def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2], likelihoodfunction='',
+def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.4], likelihoodfunction='',
               nwalkers=50, nsteps=10, nburn=150, nthreads=0, pool=None):
     # NOTE: nthreads not actually enabled!  Keep nthreads=0!
 
@@ -1726,7 +1705,7 @@ def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2], likelihoodfunction='',
     sampler.reset()
     sampler.run_mcmc(pos, nsteps)
 
-    names = ['x', 'A_V', 'w']
+    names = ['x', 'A_V', 'sigma']
     d = { k: sampler.flatchain[:,e] for e, k in enumerate(names) }
     d['lnp'] = sampler.lnprobability.flatten()
     idx = d['lnp'].argmax()
@@ -1739,7 +1718,7 @@ def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.2], likelihoodfunction='',
 
 
 def plot_mc_results(d, bestfit, datamag=0.0, datacol=0.0, 
-                    keylist=['x', 'A_V', 'w', 'lnp'],
+                    keylist=['x', 'A_V', 'sigma', 'lnp'],
                     model = ''):
 
     ##  morgan's plotting code, takes standard keywords
@@ -1899,10 +1878,10 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
     plt.title('$f_{reddened}$')
     
     plt.subplot(1,3,3)
-    im = plt.imshow(bf[:,::-1,1]*bf[:,::-1,2],vmin=0, vmax=2, interpolation='nearest', 
+    im = plt.imshow(bf[:,::-1,2],vmin=0, vmax=1.5, interpolation='nearest', 
                     extent=rangevec, origin='upper')
     plt.colorbar(im)
-    plt.title('$\sigma_{A_V}$')
+    plt.title('$\sigma$')
 
     if (pngroot != ''):
         plt.savefig(pngroot + '.1.png', bbox_inches=0)
@@ -1936,11 +1915,11 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
     plt.title('$\Delta f_{reddened}$ ')
     
     plt.subplot(1,3,3)
-    im = plt.imshow(sigw / (bf[:,::-1,1]*bf[:,::-1,2]),vmin=0, vmax=4, interpolation='nearest', 
+    im = plt.imshow(sigw / (bf[:,::-1,2]),vmin=0, vmax=1.5, interpolation='nearest', 
                     extent=rangevec, origin='upper', 
                     cmap='gist_ncar')
     plt.colorbar(im)
-    plt.title('$\Delta(\sigma_{A_V}/A_V) / (\sigma_{A_V}/A_V)$')
+    plt.title('$\Delta(\sigma) / \sigma$')
 
     if (pngroot != ''):
         plt.savefig(pngroot + '.2.png', bbox_inches=0)
@@ -1954,36 +1933,36 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
     plt.suptitle(brickname)
 
     plt.subplot(2,2,1)
-    im = plt.scatter(bf[:,:,1],bf[:,:,0],c=(bf[:,:,2]*bf[:,:,1]),s=7,linewidth=0,
-                     alpha=0.4, vmin=0, vmax=2)
+    im = plt.scatter(bf[:,:,1],bf[:,:,0],c=bf[:,:,2],s=7,linewidth=0,
+                     alpha=0.4, vmin=0, vmax=1.5)
     plt.colorbar(im)
     plt.xlabel('$A_V$')
     plt.ylabel('$f_{red}$')
     plt.axis([0, 4, 0, 1])
     
     plt.subplot(2,2,2)
-    im = plt.scatter(bf[:,:,1],bf[:,:,2]*bf[:,:,1],c=bf[:,:,0],s=7,linewidth=0,alpha=0.4,
+    im = plt.scatter(bf[:,:,1],bf[:,:,2],c=bf[:,:,0],s=7,linewidth=0,alpha=0.4,
                      vmin=0, vmax=1)
     plt.colorbar(im)
     plt.xlabel('$A_V$')
-    plt.ylabel('$\sigma_{A_V}$')
-    plt.axis([0, 4, 0, 3])
+    plt.ylabel('$\sigma$')
+    plt.axis([0, 4, 0, 1.5])
     
     plt.subplot(2,2,3)
     im = plt.scatter(bf[:,:,1],bf[:,:,2],c=bf[:,:,0],s=7,linewidth=0,alpha=0.4,
                      vmin=0, vmax=1)
     plt.colorbar(im)
     plt.xlabel('$A_V$')
-    plt.ylabel('$\sigma_{A_V} / A_V$')
-    plt.axis([0, 4, 0, 3])
+    plt.ylabel('$\sigma$')
+    plt.axis([0, 4, 0, 1.5])
     
     plt.subplot(2,2,4)
     im = plt.scatter(bf[:,:,0],bf[:,:,2],c=bf[:,:,1],s=7,linewidth=0,alpha=0.4,
                      vmin=0, vmax=4)
     plt.colorbar(im)
     plt.xlabel('$f_{red}$')
-    plt.ylabel('$\sigma_{A_V} / A_V$')
-    plt.axis([0, 1, 0, 3])
+    plt.ylabel('$\sigma$')
+    plt.axis([0, 1, 0, 1.5])
     
     if (pngroot != ''):
         plt.savefig(pngroot + '.3.png', bbox_inches=0)
@@ -2022,22 +2001,22 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
     plt.axis([0, 1, 0, 0.5])
     
     plt.subplot(2,2,3)
-    im = plt.scatter(bf[:,:,2], sigw / (bf[:,:,2]*bf[:,:,1]), c=bf[:,:,1],
+    im = plt.scatter(bf[:,:,2], sigw / (bf[:,:,2]), c=bf[:,:,1],
                      s=7, linewidth=0, alpha=0.4,
                      vmin=0, vmax=4)
     plt.colorbar(im)
-    plt.xlabel('$\sigma_{A_V} / A_V$')
-    plt.ylabel('$\Delta(\sigma_{A_V}/A_V) / (\sigma_{A_V}/A_V)$')
-    plt.axis([0, 3, 0, 4])
+    plt.xlabel('$\sigma$')
+    plt.ylabel('$\Delta(\sigma) / \sigma$')
+    plt.axis([0, 1.5, 0, 4])
     
     plt.subplot(2,2,4)
-    im = plt.scatter(bf[:,:,2],sigw / (bf[:,:,2]*bf[:,:,1]), c=bf[:,:,0],
+    im = plt.scatter(bf[:,:,2],sigw / (bf[:,:,2]), c=bf[:,:,0],
                      s=7, linewidth=0, alpha=0.4,
                      vmin=0, vmax=1)
     plt.colorbar(im)
-    plt.xlabel('$\sigma_{A_V} / A_V$')
-    plt.ylabel('$\Delta(\sigma_{A_V}/A_V) / (\sigma_{A_V}/A_V)$')
-    plt.axis([0, 3, 0, 4])
+    plt.xlabel('$\sigma$')
+    plt.ylabel('$\Delta(\sigma) / \sigma$')
+    plt.axis([0, 1.5, 0, 4])
     
     if (pngroot != ''):
         plt.savefig(pngroot + '.4.png', bbox_inches=0)
@@ -2069,12 +2048,12 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
     plt.axis([0, 4, 0, 0.5])
     
     plt.subplot(2,2,3)
-    im = plt.scatter(bf[:,:,1], sigw / (bf[:,:,2]*bf[:,:,1]), c=bf[:,:,0],
+    im = plt.scatter(bf[:,:,1], sigw / (bf[:,:,2]), c=bf[:,:,0],
                      s=7, linewidth=0, alpha=0.4,
                      vmin=0, vmax=1)
     plt.colorbar(im)
     plt.xlabel('$A_V$')
-    plt.ylabel('$\Delta(\sigma_{A_V}/A_V) / (\sigma_{A_V}/A_V)$')
+    plt.ylabel('$\Delta(\sigma) / \sigma)$')
     plt.axis([0, 4, 0, 4])
 
     if (pngroot != ''):
