@@ -1250,7 +1250,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                     # calculate mean and fractions above various thresholds
                     xvec = d['x']
                     Amedvec = d['A_V']
-                    wvec = d['w']
+                    wvec = d['sigma']
                     fredvec = (exp(xvec) / (1.0 + exp(xvec)))**(1./alpha)
                     sigma_squaredvec = log((1. + sqrt(1. + 4. * (wvec)**2)) / 2.)
                     sigmavec = sqrt(sigma_squaredvec)
@@ -1633,7 +1633,7 @@ def ln_priors(p, return_prior_parameters=False):
     p0alpha = 0.0             # for implementing skew normal prior....
 
     # set up log normal for sigma, keeping same mode
-    p2mode = 1.0              # w = broad gaussian 
+    p2mode = 0.4              # w = broad gaussian 
     p2sigma = 0.5
     p2mu = np.log(p2mode) + p2sigma**2
 
