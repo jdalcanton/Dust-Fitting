@@ -1016,6 +1016,11 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     lgnstar_range = [nanmin(lgnstar_array), nanmax(lgnstar_array)]
     print 'Log10 Nstar density Fitting Range: ', lgnstar_range
 
+    # limit the number of radial foreground CMDs to return to save space
+    dlgn_padding = 0.1
+    lgnstar_range_limit = [lgnstar_range[0]-dlgn_padding, lgnstar_range[1]+dlgn_padding]
+    print 'Expanded Log10 Nstar density Fitting Range: ', lgnstar_range_limit
+    
     # Get range of magnitude limits to set CMD limits appropriately.
     # (i.e., tighten in to speed computation)
 
@@ -1054,10 +1059,6 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
 
     # Initialize unreddened CMDs and noise models
 
-    # limit the number of radial foreground CMDs to return to save space
-    dlgn_padding = 0.1
-    lgnstar_range_limit = [lgnstar_range[0]-dlgn_padding, lgnstar_range[1]+dlgn_padding]
-    
     foreground_cmd_array, datamask_array, noise_array, noisefrac_vec, \
         meanlgnstar_vec, lgnstarrange_array, meancolor_array, sigmacolor_array, \
         n_per_cmd_vec, maglim_array, qmag_boundary, color_boundary = \
@@ -1079,10 +1080,18 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
 
     lgnstar_intervals = array([(meanlgnstar_vec[i] + meanlgnstar_vec[i+1])/2.0 
                                for i in range(len(meanlgnstar_vec)-1)])
+    # append real outer limit (note: was maximum for radius, but is minimum for lgn!)
     max_lgnstarrange = nanmax(lgnstarrange_array)
+    max_lgnstarrange = 10.0
     max_bricklgn = nanmax(lgnstar_range_limit)
     max_lgnstar = maximum(max_lgnstarrange, max_bricklgn)
-    lgnstar_intervals = append([0], lgnstar_intervals, max_lgnstar)
+    min_lgnstarrange = nanmin(lgnstarrange_array)
+    #min_lgnstarrange = -10.
+    min_bricklgn = nanmin(lgnstar_range_limit)
+    min_lgnstar = minimum(min_lgnstarrange, min_bricklgn)
+    print min_lgnstar, max_lgnstarrange, max_bricklgn
+    lgnstar_intervals = append([min_lgnstar], lgnstar_intervals, max_lgnstar)
+    print 'Using global lgnstar_intervals: ', lgnstar_intervals
 
     # bin data into ra-dec
 
@@ -1113,16 +1122,16 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
         # only analyze a radial range if some of the lgnstar-interval is
         # covered by the brick
         if (((lgnstar_intervals[i_lgn]   >= lgnstar_range[0]) & 
-             (lgnstar_intervals[i_lgn]   <= lgnstar_range[1])) | 
+             (lgnstar_intervals[i_lgn]   <  lgnstar_range[1])) | 
             ((lgnstar_intervals[i_lgn+1] >= lgnstar_range[0]) & 
-             (lgnstar_intervals[i_lgn+1] <= lgnstar_range[1]))) :
+             (lgnstar_intervals[i_lgn+1] <  lgnstar_range[1]))) :
 
             # get ra-dec pixels in the appropriate radial range
         
             i_ra, i_dec = where((lgnstar_array > lgnstar_intervals[i_lgn]) & 
                                 (lgnstar_array <= lgnstar_intervals[i_lgn + 1]))
             
-            print 'Fitting ',len(i_ra),' pixels in lgn range ', \
+            print 'Fitting ',len(i_ra),' pixels in i_lgn=',i_lgn,' in lgn range ', \
                 round(lgnstar_intervals[i_lgn],2), round(lgnstar_intervals[i_lgn+1],2), \
                 ' Pix Fraction: ', round(float(len(i_ra)) / float(len(lgnstar_array)), 3)
 
@@ -1398,7 +1407,9 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
 
         else:
 
-            print 'Skipping lgnstar_annulus: ', i_lgn
+            print 'Skipping lgnstar_annulus: ', i_lgn, ' because ', \
+                lgnstar_intervals[i_lgn],',',lgnstar_intervals[i_lgn+1],' out of range ', \
+                lgnstar_range[0],',',lgnstar_range[1]
 
     # Record results to file
 
@@ -1955,7 +1966,7 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
                     extent=rangevec, origin='upper', 
                     cmap='gist_ncar')
     plt.colorbar(im)
-    plt.title('$\Delta(\sigma) / \sigma$')
+    plt.title('$\Delta \sigma / \sigma$')
 
     if (pngroot != ''):
         plt.savefig(pngroot + '.2.png', bbox_inches=0)
@@ -2042,8 +2053,8 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
                      vmin=0, vmax=4)
     plt.colorbar(im)
     plt.xlabel('$\sigma$')
-    plt.ylabel('$\Delta(\sigma) / \sigma$')
-    plt.axis([0, 1.5, 0, 4])
+    plt.ylabel('$\Delta \sigma / \sigma$')
+    plt.axis([0, 1.5, 0, 1])
     
     plt.subplot(2,2,4)
     im = plt.scatter(bf[:,:,2],sigw / (bf[:,:,2]), c=bf[:,:,0],
@@ -2051,8 +2062,8 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
                      vmin=0, vmax=1)
     plt.colorbar(im)
     plt.xlabel('$\sigma$')
-    plt.ylabel('$\Delta(\sigma) / \sigma$')
-    plt.axis([0, 1.5, 0, 4])
+    plt.ylabel('$\Delta \sigma / \sigma$')
+    plt.axis([0, 1.5, 0, 1])
     
     if (pngroot != ''):
         plt.savefig(pngroot + '.4.png', bbox_inches=0)
@@ -2089,8 +2100,8 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
                      vmin=0, vmax=1)
     plt.colorbar(im)
     plt.xlabel('$A_V$')
-    plt.ylabel('$\Delta(\sigma) / \sigma)$')
-    plt.axis([0, 4, 0, 4])
+    plt.ylabel('$\Delta \sigma / \sigma)$')
+    plt.axis([0, 4, 0, 1])
 
     if (pngroot != ''):
         plt.savefig(pngroot + '.5.png', bbox_inches=0)
