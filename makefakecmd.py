@@ -1094,10 +1094,14 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     nx, ny = i_ra_dec_vals.shape
     nz_bestfit = 3
     nz_sigma = nz_bestfit * 3
+    nz_derived = 8
+    nz_derived_sigma = nz_derived * 3
     nz_quality = 2
     bestfit_values = zeros([nx, ny, nz_bestfit])
     percentile_values = zeros([nx, ny, nz_sigma])
     quality_values = zeros([nx, ny, nz_quality])
+    derived_values = zeros([nx, ny, nz_derived])
+    derived_percentile_values = zeros([nx, ny, nz_derived_sigma])
     output_map = zeros([nx,ny])
 
 
@@ -1238,51 +1242,77 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                     idx = d['lnp'].argmax()
                     quality_values[i_ra[i_pix], i_dec[i_pix], :] = [(d['lnp'][idx])/nstar, nstar]
                     
-                    # change x=ln(f/(1-f)) to f in bestfit and percentile
+                    # change x=ln(f/(1-f)) to f in bestfit
                     alpha = log(0.5) / log(frac_red_mean)
                     x = bestfit_values[i_ra[i_pix], i_dec[i_pix], 0]
                     f = (exp(x) / (1.0 + exp(x)))**(1./alpha)
                     bestfit_values[i_ra[i_pix], i_dec[i_pix], 0] = f
+                    # change x=ln(f/(1-f)) to f in percentile
                     x = percentile_values[i_ra[i_pix], i_dec[i_pix], 0:3]
                     f = (exp(x) / (1.0 + exp(x)))**(1./alpha)
                     percentile_values[i_ra[i_pix], i_dec[i_pix], 0:3] = f
 
                     # calculate mean and fractions above various thresholds
+                    x = bestfit[0]
+                    A = bestfit[1]
+                    s = bestfit[2]
+                    meanAV = A * np.exp(s**2 / 2.0)
+                    AVthreshvals = [0.1, 0.5, 0.8, 0.9, 1.0, 5.0, 7.0]
+                    fdense_01 = 0.5*special.erfc(np.log(AVthreshvals[0]/A) / 
+                                                      (np.sqrt(2)*s))
+                    fdense_05 = 0.5*special.erfc(np.log(AVthreshvals[1]/A) / 
+                                                      (np.sqrt(2)*s))
+                    fdense_08 = 0.5*special.erfc(np.log(AVthreshvals[2]/A) / 
+                                                      (np.sqrt(2)*s))
+                    fdense_09 = 0.5*special.erfc(np.log(AVthreshvals[3]/A) / 
+                                                      (np.sqrt(2)*s))
+                    fdense_1 = 0.5*special.erfc(np.log(AVthreshvals[3]/A) / 
+                                                      (np.sqrt(2)*s))
+                    fdense_5 = 0.5*special.erfc(np.log(AVthreshvals[4]/A) / 
+                                                      (np.sqrt(2)*s))
+                    fdense_7 = 0.5*special.erfc(np.log(AVthreshvals[5]/A) / 
+                                                      (np.sqrt(2)*s))
+                    derived_value_vec = [meanAV, fdense_01,  fdense_05,  
+                                         fdense_08,  fdense_09,  fdense_1,  
+                                         fdense_5,  fdense_7]
+                    derived_values[i_ra[i_pix], i_dec[i_pix], :] = derived_value_vec
+
+                    # calculate distributions of mean and fractions above various thresholds
                     xvec = d['x']
                     Amedvec = d['A_V']
-                    wvec = d['sigma']
+                    sigmavec = d['sigma']
                     fredvec = (exp(xvec) / (1.0 + exp(xvec)))**(1./alpha)
-                    sigma_squaredvec = log((1. + sqrt(1. + 4. * (wvec)**2)) / 2.)
-                    sigmavec = sqrt(sigma_squaredvec)
+                    sigma_squaredvec = sigmavec**2
+                    #sigma_squaredvec = log((1. + sqrt(1. + 4. * (wvec)**2)) / 2.)
+                    #sigmavec = sqrt(sigma_squaredvec)
                     meanAVvec = Amedvec * np.exp(sigma_squaredvec / 2.0)
-                    AVthreshvals = [0.1, 0.5, 0.8, 0.9, 1.0, 5.0, 7.0]
-                    fdensevals = np.zeros((len(xvec),len(AVthreshvals)))
                     percval = [16, 60, 84]
-                    fdenseval_01 = 0.5*special.erfc(np.log(AVthreshvals[0]/Amedvec) / 
+                    fdensevec_01 = 0.5*special.erfc(np.log(AVthreshvals[0]/Amedvec) / 
                                                       (np.sqrt(2)*sigmavec))
-                    fdenseval_05 = 0.5*special.erfc(np.log(AVthreshvals[1]/Amedvec) / 
+                    fdensevec_05 = 0.5*special.erfc(np.log(AVthreshvals[1]/Amedvec) / 
                                                       (np.sqrt(2)*sigmavec))
-                    fdenseval_08 = 0.5*special.erfc(np.log(AVthreshvals[2]/Amedvec) / 
+                    fdensevec_08 = 0.5*special.erfc(np.log(AVthreshvals[2]/Amedvec) / 
                                                       (np.sqrt(2)*sigmavec))
-                    fdenseval_09 = 0.5*special.erfc(np.log(AVthreshvals[3]/Amedvec) / 
+                    fdensevec_09 = 0.5*special.erfc(np.log(AVthreshvals[3]/Amedvec) / 
                                                       (np.sqrt(2)*sigmavec))
-                    fdenseval_1 = 0.5*special.erfc(np.log(AVthreshvals[3]/Amedvec) / 
+                    fdensevec_1 = 0.5*special.erfc(np.log(AVthreshvals[3]/Amedvec) / 
                                                       (np.sqrt(2)*sigmavec))
-                    fdenseval_5 = 0.5*special.erfc(np.log(AVthreshvals[4]/Amedvec) / 
+                    fdensevec_5 = 0.5*special.erfc(np.log(AVthreshvals[4]/Amedvec) / 
                                                       (np.sqrt(2)*sigmavec))
-                    fdenseval_7 = 0.5*special.erfc(np.log(AVthreshvals[5]/Amedvec) / 
+                    fdensevec_7 = 0.5*special.erfc(np.log(AVthreshvals[5]/Amedvec) / 
                                                       (np.sqrt(2)*sigmavec))
-                    names = ['sigmavec', 'meanAVvec',
-                             'fdenseval_01', 'fdenseval_05', 'fdenseval_08', 'fdenseval_09',
-                             'fdenseval_1', 'fdenseval_5', 'fdenseval_7']
-                    d_derived = {'sigmavec': sigmavec, 'meanAVvec': meanAVvec, 
-                                 'fdenseval_01': fdenseval_01, 
-                                 'fdenseval_05': fdenseval_05, 'fdenseval_08': fdenseval_08, 
-                                 'fdenseval_09': fdenseval_09, 'fdenseval_1': fdenseval_1, 
-                                 'fdenseval_5': fdenseval_5, 'fdenseval_7': fdenseval_7,
+                    derived_names = ['meanAVvec',
+                             'fdensevec_01', 'fdensevec_05', 'fdensevec_08', 'fdensevec_09',
+                             'fdensevec_1', 'fdensevec_5', 'fdensevec_7']
+                    d_derived = {'meanAVvec': meanAVvec, 
+                                 'fdensevec_01': fdensevec_01, 
+                                 'fdensevec_05': fdensevec_05, 'fdensevec_08': fdensevec_08, 
+                                 'fdensevec_09': fdensevec_09, 'fdensevec_1': fdensevec_1, 
+                                 'fdensevec_5': fdensevec_5, 'fdensevec_7': fdensevec_7,
                                  'AVthreshvals': AVthreshvals}
-                    percentile_derived = array([percentile(d_derived[names[k]], percval) 
-                                                for k in range(len(names))])
+                    percentile_derived = array([percentile(d_derived[derived_names[k]], percval) 
+                                                for k in range(len(derived_names))])
+                    derived_percentile_values[i_ra[i_pix], i_dec[i_pix], :] = percentile_derived
 
                     if (save_single_pix): 
                         fake_cmd = makefakecmd(fg_cmd, color_boundary, qmag_boundary,
@@ -1297,6 +1327,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                             str(i_dec[i_pix]) + '.npz'
                         print 'Saving demo data to ', demosavefile
                         savez(demosavefile, 
+                              derived_value_vec = derived_value_vec,
                               d_derived = d_derived,
                               percentile_derived = percentile_derived, 
                               #samp = samp,    # python doesn't know how to pickle this class
@@ -1348,6 +1379,8 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                     percentile_values[i_ra[i_pix], i_dec[i_pix], :] = [-666, -666, -666,
                                                                         -666, -666, -666,
                                                                         -666, -666, -666]
+                    derived_values[i_ra[i_pix], i_dec[i_pix], :] = np.zeros(nz_derived) - 666
+                    derived_percentile_values[i_ra[i_pix], i_dec[i_pix], :] = np.zeros(nz_derived_sigma) - 666
                     quality_values[i_ra[i_pix], i_dec[i_pix], :] = [-666, nstar]
                     acor = -666
                 
@@ -1382,6 +1415,8 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
               bestfit_values=bestfit_values, 
               percentile_values=percentile_values,
               quality_values=quality_values,
+              derived_values=derived_values,
+              derived_percentile_values=derived_percentile_values,
               ra_bins = ra_local,
               dec_bins = dec_local,
               ra_global = ra_global,
