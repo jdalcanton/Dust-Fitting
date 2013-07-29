@@ -239,16 +239,18 @@ def plot_errors(dat, indices='', fignum='', clearfig=False, *args, **kwargs):
 
     f            = dat['bestfit_values'][:,:,0]
     A_V         = dat['bestfit_values'][:,:,1]
-    sig_A_V = dat['bestfit_values'][:,:,2]
-    sig = dat['bestfit_values'][:,:,2] * dat['bestfit_values'][:,:,1]
+    #sig_A_V = dat['bestfit_values'][:,:,2]
+    #sig = dat['bestfit_values'][:,:,2] * dat['bestfit_values'][:,:,1]
+    sig = dat['bestfit_values'][:,:,2]
+    sig_A_V = dat['bestfit_values'][:,:,2] / dat['bestfit_values'][:,:,1]
     stdvec = (dat['percentile_values'][:,:,[2,5,8]] - dat['percentile_values'][:,:,[0,3,6]]) / 2.0
     medvec = dat['percentile_values'][:,:,[1,4,7]]
     f_std = stdvec[:,:,0]
     f_med = medvec[:,:,0]
     A_V_std = stdvec[:,:,1]
     A_V_med = medvec[:,:,1]
-    sig_A_V_std = stdvec[:,:,2]
-    sig_A_V_med = medvec[:,:,2]
+    sig_std = stdvec[:,:,2]
+    sig_med = medvec[:,:,2]
     #medvec = np.reshape(dat['percentile_values'][:,:,[1,4,7]], (-1, 3))
         
     if (indices != ''):
@@ -261,8 +263,8 @@ def plot_errors(dat, indices='', fignum='', clearfig=False, *args, **kwargs):
         f_med = f_med[indices[0],indices[1]]
         A_V_std = A_V_std[indices[0],indices[1]]
         A_V_med = A_V_med[indices[0],indices[1]]
-        sig_A_V_std = sig_A_V_std[indices[0],indices[1]]
-        sig_A_V_med = sig_A_V_med[indices[0],indices[1]]
+        sig_std = sig_std[indices[0],indices[1]]
+        sig_med = sig_med[indices[0],indices[1]]
 
     # test plot
 
@@ -305,19 +307,19 @@ def plot_errors(dat, indices='', fignum='', clearfig=False, *args, **kwargs):
     plt.ylabel(' |Median $f_{red}$ - Bestfit $f_{red}$|')
 
     plt.subplot(3,3,7)
-    plt.plot(sig_A_V, sig_A_V_std, ',', **kwargs)
+    plt.plot(sig, sig_std, ',', **kwargs)
     plt.axis([-0.05, 2, -0.05, 1])
     plt.xlabel('$\sigma / A_V$')
     plt.ylabel('$\Delta(\sigma / A_V)$')
 
     plt.subplot(3,3,8)
-    plt.plot(sig_A_V, sig_A_V_med - sig_A_V, ',', **kwargs)
+    plt.plot(sig, sig_med - sig, ',', **kwargs)
     plt.axis([-0.05, 2, -1, 1])
     plt.xlabel('$\sigma / A_V$')
     plt.ylabel(' Median $\sigma / A_V$ - Bestfit $\sigma / A_V$')
 
     plt.subplot(3,3,9)
-    plt.plot(sig_A_V_std, abs(sig_A_V_med - sig_A_V), ',', **kwargs)
+    plt.plot(sig_std, abs(sig_med - sig), ',', **kwargs)
     plt.plot([0,0],[4,4], color='red')
     plt.axis([-0.05, 1, -0.05, 1])
     plt.xlabel('$\Delta(\sigma / A_V)$')

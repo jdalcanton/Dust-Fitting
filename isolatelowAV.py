@@ -1207,7 +1207,7 @@ def clean_low_AZ_sample(tolerance = 0.0025, color_tolerance=0.02, makenoise=Fals
 def read_clean(readnoise = False):
 
     resultsdir = '../Unreddened/'
-    resultsdir = '../Unreddened/FourthRun15arcsec/'
+    #resultsdir = '../Unreddened/FourthRun15arcsec/'
     savefilename = resultsdir + 'allbricks.clean.npz'
     if readnoise:
         savefilename = resultsdir + 'allbricks.noise.clean.npz'

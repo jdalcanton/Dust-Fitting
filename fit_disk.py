@@ -11,7 +11,7 @@ import PIL
 import time
 import ezfig  # morgan's plotting code
 import random as rnd
-import triangle
+#import triangle
 
 def get_major_axis(ra, dec, m31ra=10.6847929, m31dec = 41.2690650, pa=38.5, incl=74.):
 
@@ -506,7 +506,7 @@ def fit_disk(ncomp = 10, d_dec=15., use_prev_results=True):
 
     plot_gaussians(bestfit, param_orig=param_init, fignum=5)
 
-    # triangle plot
+    # used for triangle plot of output
     varnames = [' ']
     for i in np.arange(0, ncomp):
         varnames.append('PA' + str(i))

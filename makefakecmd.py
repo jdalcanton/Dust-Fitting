@@ -1,6 +1,6 @@
 ## to deal with display when running as background jobs
-#from matplotlib import use
-#use('Agg')
+from matplotlib import use
+use('Agg')
 import pyfits
 from numpy import *
 
@@ -1212,6 +1212,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
 
                 # If there are still enough stars, do fit.
 
+                save_single_pix = False
                 if (len(grab_ira_idec) == 2): 
                     save_single_pix = True
                     trypix = False
@@ -1312,7 +1313,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                                  'AVthreshvals': AVthreshvals}
                     percentile_derived = array([percentile(d_derived[derived_names[k]], percval) 
                                                 for k in range(len(derived_names))])
-                    derived_percentile_values[i_ra[i_pix], i_dec[i_pix], :] = percentile_derived
+                    derived_percentile_values[i_ra[i_pix], i_dec[i_pix], :] = percentile_derived.flatten()
 
                     if (save_single_pix): 
                         fake_cmd = makefakecmd(fg_cmd, color_boundary, qmag_boundary,
@@ -2143,16 +2144,16 @@ def show_model_examples():
 
     plt.draw()
 
-##  set up to allow calls from the shell with arguments
-#import sys
-##
-#if __name__ == '__main__':
-#  datafile = sys.argv[1]
-#  deltapixorig = [float(sys.argv[2]), float(sys.argv[3])]
-#  d_arcsec = float(sys.argv[4])
-#  results_extension=sys.argv[5]
-#  print 'Datafile: ', datafile
-#  print 'deltapixorig: ', deltapixorig
-#  print 'd_arcsec: ', d_arcsec
-#  print 'results_extension', results_extension
-#  bfarray, percarray = run_one_brick(datafile, deltapixorig=deltapixorig, d_arcsec=d_arcsec, results_extension=results_extension, datadir='/mnt/angst4/dstn/v8/', showplot='')
+#  set up to allow calls from the shell with arguments
+import sys
+#
+if __name__ == '__main__':
+  datafile = sys.argv[1]
+  deltapixorig = [float(sys.argv[2]), float(sys.argv[3])]
+  d_arcsec = float(sys.argv[4])
+  results_extension=sys.argv[5]
+  print 'Datafile: ', datafile
+  print 'deltapixorig: ', deltapixorig
+  print 'd_arcsec: ', d_arcsec
+  print 'results_extension', results_extension
+  bfarray, percarray = run_one_brick(datafile, deltapixorig=deltapixorig, d_arcsec=d_arcsec, results_extension=results_extension, datadir='/mnt/angst4/dstn/v8/', showplot='')
