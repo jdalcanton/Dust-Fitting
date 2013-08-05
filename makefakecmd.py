@@ -858,14 +858,16 @@ def extract_local_subgrid(ra_range, dec_range,
     i_ra =  (array(ra_range)  - ra_bins_global[0])  / dra
     i_dec = (array(dec_range) - dec_bins_global[0]) / ddec
 
-    i_ra[0]  = (floor(i_ra[0])).astype(int)
-    i_dec[0] = (floor(i_dec[0])).astype(int)
+    i_ra[0]  = max((floor(i_ra[0])).astype(int), 0)  # prevent negatives
+    i_dec[0] = max((floor(i_dec[0])).astype(int), 0)
 
     i_ra[1]  = (ceil(i_ra[1] + 1)).astype(int)   # add 1 for slicing to work
     i_dec[1] = (ceil(i_dec[1] + 1)).astype(int)  # add 1 for slicing to work
 
-    return ra_bins_global[i_ra[0]:i_ra[1]], dec_bins_global[i_dec[0]:i_dec[1]], i_ra, i_dec
+    print 'Extracting RA Global points between ',i_ra[0], ' and ', i_ra[1]
+    print 'Extracting Dec Global points between ',i_dec[0], ' and ', i_dec[1]
 
+    return ra_bins_global[i_ra[0]:i_ra[1]], dec_bins_global[i_dec[0]:i_dec[1]], i_ra, i_dec
 
     
 def get_ra_dec_bin(i_ra=60, i_dec=20):
@@ -919,7 +921,7 @@ class likelihoodobj(object):
         return self(*args)
 
 def run_one_brick(fileroot, datadir='../../Data/', results_extension='', 
-                  deltapixorig = [0.025,0.2], d_arcsec = 6.64515,
+                  deltapixorig = [0.025,0.2], d_arcsec = 6.64515, d_pix_offset=[0,0],
                   showplot='', nwalkers=50, nsamp=15, nburn=150, grab_ira_idec=[]):
     """
     For a given fits file, do all the necessary prep for running fits
@@ -970,7 +972,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     # Store processing parameters in dictionary
 
     allparamvals = locals()
-    param_names = ['crange', 'maglimoff', 'deltapixorig', 'mfitrange', 'd_arcsec', 
+    param_names = ['crange', 'maglimoff', 'deltapixorig', 'mfitrange', 'd_arcsec',  'd_pix_offset',
                    'floorfrac_value', 'dr', 'r_interval_range', 'nrgbstars', 'n_substeps', 
                    'masksig', 'noisemasksig', 'n_fit_min', 'frac_red_mean', 
                    'Amag_AV', 'Acol_AV', 'reference_color', 
@@ -990,9 +992,18 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     ra_range = [min(ra), max(ra)]
     dec_range = [min(dec), max(dec)]
 
-    # Get ra-dec grid range from global ra-dec grid
+    # Set up global grid, and shift by fractional pixel if requested
 
     ra_global, dec_global = generate_global_ra_dec_grid(d_arcsec = d_arcsec)
+    if (d_pix_offset != [0,0]):
+        print 'Offsetting RA, Dec grid by fractional pixel: ',d_pix_offset
+        dra  = ra_global[1]  - ra_global[0]
+        ddec = dec_global[1] - dec_global[0]
+        ra_global = ra_global + dra * d_pix_offset[0]
+        dec_global = dec_global + ddec * d_pix_offset[1]
+
+    # extract local subset of global grid
+
     ra_local,  dec_local, ira, idec = extract_local_subgrid(ra_range, dec_range, 
                                                             ra_global, dec_global)
 
@@ -1089,7 +1100,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     #min_lgnstarrange = -10.
     min_bricklgn = nanmin(lgnstar_range_limit)
     min_lgnstar = minimum(min_lgnstarrange, min_bricklgn)
-    print min_lgnstar, max_lgnstarrange, max_bricklgn
+    print min_lgnstar, min_lgnstarrange, max_bricklgn
     lgnstar_intervals = append([min_lgnstar], lgnstar_intervals, max_lgnstar)
     print 'Using global lgnstar_intervals: ', lgnstar_intervals
 
@@ -1099,19 +1110,19 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                                                             ra_bins = ra_local, 
                                                             dec_bins=dec_local)
 
-    # initialize sizes of output arrays
+    # initialize sizes of output arrays.  -666 is default for no data
     nx, ny = i_ra_dec_vals.shape
     nz_bestfit = 3
     nz_sigma = nz_bestfit * 3
     nz_derived = 8
     nz_derived_sigma = nz_derived * 3
     nz_quality = 2
-    bestfit_values = zeros([nx, ny, nz_bestfit])
-    percentile_values = zeros([nx, ny, nz_sigma])
-    quality_values = zeros([nx, ny, nz_quality])
-    derived_values = zeros([nx, ny, nz_derived])
-    derived_percentile_values = zeros([nx, ny, nz_derived_sigma])
-    output_map = zeros([nx,ny])
+    bestfit_values = zeros([nx, ny, nz_bestfit]) - 666.
+    percentile_values = zeros([nx, ny, nz_sigma]) - 666.
+    quality_values = zeros([nx, ny, nz_quality]) - 666.
+    derived_values = zeros([nx, ny, nz_derived]) - 666.
+    derived_percentile_values = zeros([nx, ny, nz_derived_sigma]) - 666.
+    output_map = zeros([nx,ny]) - 666.
 
 
     # Loop through all possible lgnstar values
@@ -1433,7 +1444,8 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
               dec_bins = dec_local,
               ra_global = ra_global,
               dec_global = dec_global,
-              processing_params = processing_params)
+              processing_params = processing_params,
+              output_map=output_map)
     except:
         print 'Failed to save file', filename
 
@@ -1913,7 +1925,7 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
     A = bf[:,:,1]
     #im = plt.imshow(bf[:,:,1],vmin=0, vmax=4, interpolation='nearest', 
     im = plt.imshow(bf[:,::-1,1],vmin=0, vmax=4, interpolation='nearest', 
-                    extent=rangevec, origin='upper')
+                    extent=rangevec, origin='upper', cmap='hot')
     plt.colorbar(im)
     plt.title('$A_V$')
     
@@ -1925,8 +1937,8 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
     plt.title('$f_{reddened}$')
     
     plt.subplot(1,3,3)
-    im = plt.imshow(bf[:,::-1,2],vmin=0, vmax=1.5, interpolation='nearest', 
-                    extent=rangevec, origin='upper')
+    im = plt.imshow(bf[:,::-1,2],vmin=0.2, vmax=0.7, interpolation='nearest', 
+                    extent=rangevec, origin='upper', cmap='hot')
     plt.colorbar(im)
     plt.title('$\sigma$')
 
@@ -1948,7 +1960,7 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
     plt.subplots_adjust(left=0.02, right=0.98)
 
     plt.subplot(1,3,1)
-    im = plt.imshow(sigA/bf[:,::-1,1],vmin=0, vmax=1.5, interpolation='nearest', 
+    im = plt.imshow(sigA/bf[:,::-1,1],vmin=0, vmax=1.0, interpolation='nearest', 
                     extent=rangevec, origin='upper', 
                     cmap='gist_ncar')
     plt.colorbar(im)
@@ -1962,7 +1974,7 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
     plt.title('$\Delta f_{reddened}$ ')
     
     plt.subplot(1,3,3)
-    im = plt.imshow(sigw / (bf[:,::-1,2]),vmin=0, vmax=1.5, interpolation='nearest', 
+    im = plt.imshow(sigw / (bf[:,::-1,2]),vmin=0.1, vmax=1.0, interpolation='nearest', 
                     extent=rangevec, origin='upper', 
                     cmap='gist_ncar')
     plt.colorbar(im)
@@ -2162,9 +2174,13 @@ if __name__ == '__main__':
   datafile = sys.argv[1]
   deltapixorig = [float(sys.argv[2]), float(sys.argv[3])]
   d_arcsec = float(sys.argv[4])
-  results_extension=sys.argv[5]
+  results_extension = sys.argv[5]
+  d_pix_offset = [0,0]
+  if (len(sys.argv) > 6):
+      d_pix_offset = [float(sys.argv[6]), float(sys.argv[7])]
   print 'Datafile: ', datafile
   print 'deltapixorig: ', deltapixorig
   print 'd_arcsec: ', d_arcsec
   print 'results_extension', results_extension
-  bfarray, percarray = run_one_brick(datafile, deltapixorig=deltapixorig, d_arcsec=d_arcsec, results_extension=results_extension, datadir='/mnt/angst4/dstn/v8/', showplot='')
+  print 'd_pix_offset', d_pix_offset
+  bfarray, percarray = run_one_brick(datafile, deltapixorig=deltapixorig, d_arcsec=d_arcsec, results_extension=results_extension, datadir='/mnt/angst4/dstn/v8/', showplot='', d_pix_offset = d_pix_offset)

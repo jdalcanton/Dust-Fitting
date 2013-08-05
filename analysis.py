@@ -16,18 +16,21 @@ import ezfig  # morgan's plotting code
 import pyfits as pyfits
 import pywcs as pywcs
 import makefakecmd as mfc
+import aplpy as aplpy
 
-def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resultsdir='../Results/',
+def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], 
+                  resultsdir='../Results/', fileextension='',
                   mergefileroot='merged'):
 
-    savefilelist = ['ir-sf-b02-v8-st.npz', 'ir-sf-b04-v8-st.npz', 'ir-sf-b05-v8-st.npz', 
-                    'ir-sf-b06-v8-st.npz', 'ir-sf-b08-v8-st.npz', 'ir-sf-b09-v8-st.npz', 
-                    'ir-sf-b12-v8-st.npz', 'ir-sf-b14-v8-st.npz', 'ir-sf-b15-v8-st.npz', 
-                    'ir-sf-b16-v8-st.npz', 'ir-sf-b17-v8-st.npz', 'ir-sf-b18-v8-st.npz', 
-                    'ir-sf-b19-v8-st.npz', 'ir-sf-b21-v8-st.npz', 'ir-sf-b22-v8-st.npz', 
-                    'ir-sf-b23-v8-st.npz']
-    mergefile = resultsdir + mergefileroot + '.npz'
-    pngfileroot = resultsdir + mergefileroot
+    savefilelist = ['ir-sf-b02-v8-st', 'ir-sf-b04-v8-st', 'ir-sf-b05-v8-st', 
+                    'ir-sf-b06-v8-st', 'ir-sf-b08-v8-st', 'ir-sf-b09-v8-st', 
+                    'ir-sf-b12-v8-st', 'ir-sf-b14-v8-st', 'ir-sf-b15-v8-st', 
+                    'ir-sf-b16-v8-st', 'ir-sf-b17-v8-st', 'ir-sf-b18-v8-st', 
+                    'ir-sf-b19-v8-st', 'ir-sf-b21-v8-st', 'ir-sf-b22-v8-st', 
+                    'ir-sf-b23-v8-st']
+    savefilelist = [s + fileextension + '.npz' for s in savefilelist]
+    mergefile = resultsdir + mergefileroot + fileextension + '.npz'
+    pngfileroot = resultsdir + mergefileroot + fileextension
 
     # initialize ra-dec grid
 
@@ -43,10 +46,14 @@ def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resul
 
     nz_bestfit = 3
     nz_sigma = nz_bestfit * 3
+    nz_derived = 8
+    nz_derived_sigma = nz_derived * 3
     nz_quality = 2
     bestfit_values = np.zeros([nx, ny, nz_bestfit])
     percentile_values = np.zeros([nx, ny, nz_sigma])
     quality_values = np.zeros([nx, ny, nz_quality])
+    derived_values = np.zeros([nx, ny, nz_derived])
+    derived_percentile_values = np.zeros([nx, ny, nz_derived_sigma])
 
     # loop through list of files
 
@@ -58,6 +65,8 @@ def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resul
         bf = dat['bestfit_values']
         p  = dat['percentile_values']
         q  = dat['quality_values']
+        der = dat['derived_values']
+        derp = dat['derived_percentile_values']
         if (len(p.shape) == 4):
             p = p[0,:,:,:]
         if (len(q.shape) == 4):
@@ -102,6 +111,8 @@ def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resul
                         bestfit_values[   i_x0 + i_x, i_y0 + i_y, :] = bf[i_x, i_y, :]
                         percentile_values[i_x0 + i_x, i_y0 + i_y, :] = p[i_x, i_y, :]
                         quality_values[   i_x0 + i_x, i_y0 + i_y, :] = q[i_x, i_y, :]
+                        derived_values[   i_x0 + i_x, i_y0 + i_y, :] = der[i_x, i_y, :]
+                        derived_percentile_values[   i_x0 + i_x, i_y0 + i_y, :] = derp[i_x, i_y, :]
         
         else:
 
@@ -113,12 +124,21 @@ def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resul
 
     likelihood_cut = -6.4
     median_filt_cut = 7
+
     bf_smooth = filt.median_filter(bestfit_values, size=(3,3,1))
     bad_pix_mask = np.where(bestfit_values[:,:,1] / bf_smooth[:,:,1] > median_filt_cut, 0., 1.)
     bestfit_values_clean = bestfit_values.copy()
     bestfit_values_clean[:,:,0] = bestfit_values[:,:,0] * bad_pix_mask + bf_smooth[:,:,0]*(1.-bad_pix_mask)
     bestfit_values_clean[:,:,1] = bestfit_values[:,:,1] * bad_pix_mask + bf_smooth[:,:,1]*(1.-bad_pix_mask)
     bestfit_values_clean[:,:,2] = bestfit_values[:,:,2] * bad_pix_mask + bf_smooth[:,:,2]*(1.-bad_pix_mask)
+
+    der_smooth = filt.median_filter(derived_values, size=(3,3,1))
+    bad_pix_mask = np.where(derived_values[:,:,1] / der_smooth[:,:,1] > median_filt_cut, 0., 1.)
+    derived_values_clean = derived_values.copy()
+    derived_values_clean[:,:,0] = derived_values[:,:,0] * bad_pix_mask + der_smooth[:,:,0]*(1.-bad_pix_mask)
+    derived_values_clean[:,:,1] = derived_values[:,:,1] * bad_pix_mask + der_smooth[:,:,1]*(1.-bad_pix_mask)
+    derived_values_clean[:,:,2] = derived_values[:,:,2] * bad_pix_mask + der_smooth[:,:,2]*(1.-bad_pix_mask)
+
     # helped a bit, but not much...
     #bad_pix_mask = np.where((bestfit_values[:,:,2] < 0.45 - 0.45*bestfit_values[:,:,1]) |
     #                     (quality_values[:,:,0] < likelihood_cut), 0., 1.)
@@ -135,8 +155,11 @@ def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], resul
           bestfit_values = bestfit_values,
           percentile_values = percentile_values,
           quality_values = quality_values,
+          derived_values = derived_values,
+          derived_percentile_values = derived_percentile_values,
           bad_pix_mask = bad_pix_mask,
           bestfit_values_clean = bestfit_values_clean,
+          dervied_values_clean = derived_values_clean,
           ra_bins = ra_global,
           dec_bins = dec_global,
           savefilelist = savefilelist)
@@ -970,8 +993,8 @@ def make_fits_image(fitsfilename, array, rabins, decbins, badval=-666, replaceva
     #hdr.update('CD2_1',  ddec,    'd(Dec)/dx')
     #hdr.update('CD2_2',  0, 'd(Dec)/dy')
     # to get Wells convention working...
-    #hdr.update('CDELT1', dra, 'd(RA*cos(Dec))/dx')
-    #hdr.update('CDELT2', ddec, 'd(Dec)/dy')
+    hdr.update('CDELT1', dra, 'd(RA*cos(Dec))/dx')
+    hdr.update('CDELT2', ddec, 'd(Dec)/dy')
     ############
     #hdr.update('RA_TAN', m31ra, 'Tangent Point')
     #hdr.update('DEC_TAN', m31dec, 'Tangent Point')
@@ -996,8 +1019,8 @@ def make_radius_image(fitsfilename, rabins, decbins):
     
             
 # read in image, and match resolution & astrometry of extinction map to it
-def compare_img_to_AV(imgfile, resolution_in_arcsec='', scaleimgfactor=1.0,
-                      crop='True', outputAVfile='', AVdatafile='../Results/merged.npz',
+def compare_img_to_AV(AV, ra_bins, dec_bins, imgfile, resolution_in_arcsec='', scaleimgfactor=1.0,
+                      crop='True', outputAVfile='', 
                       usemeanAV=True):
 
     f = pyfits.open(imgfile)
@@ -1030,16 +1053,16 @@ def compare_img_to_AV(imgfile, resolution_in_arcsec='', scaleimgfactor=1.0,
     # read A_V data
 
     print 'Reading merged AV file.'
-    avdat = np.load(AVdatafile)
-    AV = avdat['bestfit_values_clean'][:,:,1]
-    stddev_over_AV = avdat['bestfit_values_clean'][:,:,2]
-    if usemeanAV:
-        print 'Using Mean A_V, not median'
-        ###  NOTE!!! Incorrect -- compensates for error in runs 1-3!!!!
-        sig = np.log((1. + np.sqrt(1. + 4. * (stddev_over_AV)**2)) / 2.)
-        AV = AV * np.exp(sig**2 / 2.0)
-    ra_bins = avdat['ra_bins']
-    dec_bins = avdat['dec_bins']
+    #avdat = np.load(AVdatafile)
+    #AV = avdat['bestfit_values_clean'][:,:,1]
+    #stddev_over_AV = avdat['bestfit_values_clean'][:,:,2]
+    #if usemeanAV:
+    #    print 'Using Mean A_V, not median'
+    #    ###  NOTE!!! Incorrect -- compensates for error in runs 1-3!!!!
+    #    sig = np.log((1. + np.sqrt(1. + 4. * (stddev_over_AV)**2)) / 2.)
+    #    AV = AV * np.exp(sig**2 / 2.0)
+    #ra_bins = avdat['ra_bins']
+    #dec_bins = avdat['dec_bins']
     racenvec  = (ra_bins[0:-2]  +  ra_bins[1:-1]) / 2.0
     deccenvec = (dec_bins[0:-2] + dec_bins[1:-1]) / 2.0
     #ra_AV, dec_AV = np.meshgrid(racenvec, deccenvec)
@@ -1123,7 +1146,8 @@ def compare_img_to_AV(imgfile, resolution_in_arcsec='', scaleimgfactor=1.0,
 
     return wcs, img_coords, img, AV_img
 
-def compare_draine_dust(AVdatafile='../Results/SecondRunLoRes/merged.npz'):
+#def compare_draine_dust(AVdatafile='../Results/SecondRunLoRes/merged.npz'):
+def compare_draine_dust(AV, ra_bins, dec_bins):
 
     drainefile = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.fits'
     resolution = 10.0  # arcsec
@@ -1131,10 +1155,12 @@ def compare_draine_dust(AVdatafile='../Results/SecondRunLoRes/merged.npz'):
     outputfile = '../Results/FirstRun/draine_matched_AV.fits'
     scalefac = 0.74 / 1.e5  # Draine email May 29, 2013
 
-    wcs, im_coords, img, AV_img = compare_img_to_AV(drainefile, crop='True',
+    #wcs, im_coords, img, AV_img = compare_img_to_AV(drainefile, crop='True',
+    wcs, im_coords, img, AV_img = compare_img_to_AV(AV, ra_bins, dec_bins, drainefile, crop='True',
                                                     scaleimgfactor = scalefac,
                                                     resolution_in_arcsec=resolution, 
-                                                    outputAVfile='', AVdatafile=AVdatafile,
+                                                    #outputAVfile='', AVdatafile=AVdatafile,
+                                                    outputAVfile='', 
                                                     usemeanAV=True)
     mask = np.where(AV_img > 0, 1.0, 0.0)
     lowAVmask = np.where(AV_img > 0.4, 1.0, 0.0)
@@ -1693,4 +1719,146 @@ def plot_dense_gas(filename='merged.npz', resultsdir='../Results/', AKthresh=0.1
     plt.hist(AVmean[iAVgood],bins=lgAVbins, log=True)
 
     return
+
+def interleave_maps(fileroot = 'ir-sf-b15-v8-st',
+                    file_0='.05_0', 
+                    file_1='', 
+                    file_2='.0_05', 
+                    file_3='.05_05', 
+                    resultsdir='../Results/',
+                    arrayname='bestfit_values_clean',
+                    arraynum=1):
+
+    print 'File_1: ', file_1
+    print 'File_3: ', file_3
+
+    d_0 = np.load(resultsdir + fileroot + file_0 + '.npz')
+    d_1 = np.load(resultsdir + fileroot + file_1 + '.npz')
+    d_2 = np.load(resultsdir + fileroot + file_2 + '.npz')
+    d_3 = np.load(resultsdir + fileroot + file_3 + '.npz')
+
+    arrayname='dervied_values_clean'
+    arraynum=0
+    bf_0 = d_0[arrayname][:,:,arraynum]
+    bf_1 = d_1[arrayname][:,:,arraynum]
+    bf_2 = d_2[arrayname][:,:,arraynum]
+    bf_3 = d_3[arrayname][:,:,arraynum]
+
+    array_dict = {'0': bf_0, '1': bf_1, '2': bf_2, '3': bf_3}
+
+    ra_bins_0 = d_0['ra_bins']
+    ra_bins_1 = d_1['ra_bins']
+    ra_bins_2 = d_2['ra_bins']
+    ra_bins_3 = d_3['ra_bins']
+
+    dec_bins_0 = d_0['dec_bins']
+    dec_bins_1 = d_1['dec_bins']
+    dec_bins_2 = d_2['dec_bins']
+    dec_bins_3 = d_3['dec_bins']
+
+    rabins_dict = {'0': ra_bins_0, '1': ra_bins_1, '2': ra_bins_2, '3': ra_bins_3}
+    decbins_dict = {'0': dec_bins_0, '1': dec_bins_1, '2': dec_bins_2, '3': dec_bins_3}
+
+    print bf_0.shape, ra_bins_0.shape, dec_bins_0.shape
+    print bf_1.shape, ra_bins_1.shape, dec_bins_1.shape
+    print bf_2.shape, ra_bins_2.shape, dec_bins_2.shape
+    print bf_3.shape, ra_bins_3.shape, dec_bins_3.shape
+
+    AV, ra_edge, dec_edge = interleave(array_dict, rabins_dict, decbins_dict)
+
+    return AV, ra_edge, dec_edge
+
+def interleave(array_dict, xbins_dict, ybins_dict):
+    """
+    interleave evenly spaced grids with half pixel shifts, 
+    producing proper edge vectors as well
+    
+    input:
+
+    array_dict = {'0': array0, '1': array1, '2': array2, '3': array3}
+    xbins_dict = {'0': xbins0, '1': xbins1, '2': xbins2, '3': xbins3}
+    ybins_dict = {'0': ybins0, '1': ybins1, '2': ybins2, '3': ybins3}
+    """
+
+    # figure out order to interleave
+    xminvec  = np.array([xbins_dict['0'][0], xbins_dict['1'][0], 
+                         xbins_dict['2'][0], xbins_dict['3'][0]])
+    yminvec  = np.array([ybins_dict['0'][0], ybins_dict['1'][0], 
+                         ybins_dict['2'][0], ybins_dict['3'][0]])
+    xrank = 0*xminvec + 1
+    xrank[np.where(xminvec == min(xminvec))] = 0
+    yrank = 0*yminvec + 1
+    yrank[np.where(yminvec == min(yminvec))] = 0
+
+    print 'Initial X Rank: ', xrank
+    print 'Initial Y Rank: ', yrank
+
+    n_ll = np.where((xrank == 0) & (yrank == 0))[0][0]
+    n_lr = np.where((xrank == 1) & (yrank == 0))[0][0]
+    n_ur = np.where((xrank == 1) & (yrank == 1))[0][0]
+    n_ul = np.where((xrank == 0) & (yrank == 1))[0][0]
+
+    # assign lower left, lower right, etc
+
+    ll = array_dict[str(n_ll)]
+    lr = array_dict[str(n_lr)]
+    ur = array_dict[str(n_ur)]
+    ul = array_dict[str(n_ul)]
+
+    ll_xbins, ll_ybins = xbins_dict[str(n_ll)], ybins_dict[str(n_ll)]
+    lr_xbins, lr_ybins = xbins_dict[str(n_lr)], ybins_dict[str(n_lr)]
+    ul_xbins, ul_ybins = xbins_dict[str(n_ul)], ybins_dict[str(n_ul)]
+    ur_xbins, ur_ybins = xbins_dict[str(n_ur)], ybins_dict[str(n_ur)]
+
+    # interleave arrys
+    nx1 = ll.shape[0]
+    nx2 = lr.shape[0]
+    ny1 = ll.shape[1]
+    ny2 = ul.shape[1]
+    output_grid = np.empty((nx1+nx2, ny1+ny2), dtype=ll.dtype)
+    output_grid[0::2,0::2] = ll
+    output_grid[1::2,0::2] = lr
+    output_grid[0::2,1::2] = ul
+    output_grid[1::2,1::2] = ur
+
+    # interleave edge vectors
+    nxbins1 = len(ll_xbins)
+    nxbins2 = len(lr_xbins)
+    nybins1 = len(ll_ybins)
+    nybins2 = len(ul_ybins)
+    xbins = np.empty(nxbins1+nxbins2, dtype=ll_xbins.dtype)
+    ybins = np.empty(nybins1+nybins2, dtype=ll_ybins.dtype)
+    xbins[0::2] = ll_xbins
+    xbins[1::2] = lr_xbins
+    ybins[0::2] = ll_ybins
+    ybins[1::2] = ul_ybins
+
+    # define new pixel boundaries for smaller spaced grid
+    output_xbins = (xbins[0:-1] + xbins[1:]) / 2.0
+    output_ybins = (ybins[0:-1] + ybins[1:]) / 2.0
+
+    # return stuff
+
+    return output_grid, output_xbins, output_ybins
+
+def plot_AV_map(fitsimage):
+
+    gc = aplpy.FITSFigure(fitsimage, convention='wells', figsize=(10,11))
+    gc.show_colorscale(vmin=0, vmax=4, cmap='gist_heat', 
+                       interpolation='nearest', aspect='equal')
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$A_V$')
+
+    return
+
 
