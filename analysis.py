@@ -12,11 +12,14 @@ import isolatelowAV as iAV
 from scipy.ndimage import filters as filt
 import scipy.special as special
 from random import sample
+import random as random
+import copy as copy
 import ezfig  # morgan's plotting code
 import pyfits as pyfits
 import pywcs as pywcs
 import makefakecmd as mfc
 import aplpy as aplpy
+from astropy.io import fits
 
 def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], 
                   resultsdir='../Results/', fileextension='',
@@ -1016,10 +1019,458 @@ def make_radius_image(fitsfilename, rabins, decbins):
     #make_fits_image('ra_image.fits', ra, rabins, decbins)
 
     return r, ra, dec
+
+def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
+                              cleanstr = '_clean', imgexten='.png',
+                              write_fits = 'True'):
+
+    drainefile = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.AV.fits'
+    draineresolution = 24.9
+    AVresolution = 6.645
+    output_smooth_AV_root = resultsdir + fileroot + '_interleaved_draine_smoothed.AV'
+    output_smooth_meanAV_root = resultsdir + fileroot + '_interleaved_draine_smoothed.meanAV'
+    output_smooth_AV_file = output_smooth_AV_root + '.fits'
+    output_smooth_meanAV_file = output_smooth_meanAV_root + '.fits'
+        
+    # median extinction
+    arrayname = 'bestfit_values' + cleanstr
+    arraynum = 1
+    a, ra_bins, dec_bins = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                                           arrayname=arrayname, 
+                                           arraynum=arraynum)
+    AV = a
+    print 'Size of extinciton map: ', AV.shape
+
+    # mean extinction
+    if (fileroot == 'merged'):
+        arrayname = 'dervied_values' + cleanstr  #  note mispelling!
+    else:
+        arrayname = 'derived_values' + cleanstr
+    arraynum = 0
+    a, ra_bins, dec_bins = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                                           arrayname=arrayname, 
+                                           arraynum=arraynum)
+    meanAV = a
+
+    # run the smoothing algorithm on both A_V maps
+
+    if (write_fits == 'True'):
+
+        wcs, im_coords, draineimg, AV_img = compare_img_to_AV(AV, ra_bins, dec_bins, drainefile, 
+                                                              crop='True',
+                                                              scaleimgfactor = 1.0,
+                                                              resolution_in_arcsec=draineresolution, 
+                                                              AV_resolution_in_arcsec=AVresolution, 
+                                                              outputAVfile=output_smooth_AV_file)
+        wcs, im_coords, draineimg, meanAV_img = compare_img_to_AV(meanAV, ra_bins, dec_bins, drainefile, 
+                                                                  crop='True',
+                                                                  scaleimgfactor = 1.0,
+                                                                  resolution_in_arcsec=draineresolution, 
+                                                                  AV_resolution_in_arcsec=AVresolution, 
+                                                                  outputAVfile=output_smooth_meanAV_file)
+    else:
+
+        # read from existing files
+        f = pyfits.open(drainefile)
+        draineimg = f[0].data
+        f = pyfits.open(drainefile)
+        hdr, draineimg = f[0].header, f[0].data
+        f = pyfits.open(output_smooth_AV_file)
+        AV_img = f[0].data
+        f = pyfits.open(output_smooth_meanAV_file)
+        meanAV_img = f[0].data
+
+    # get ra dec of draine image
+    f = pyfits.open(drainefile)
+    hdr = f[0].header
+    wcs = pywcs.WCS(hdr)
+    i_dec, i_ra = np.meshgrid(np.arange(draineimg.shape[1]), np.arange(draineimg.shape[0]))
+    i_coords = np.array([[i_dec[i,j],i_ra[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
+    print 'draineimg.shape: ', draineimg.shape
+    print 'i_dec.shape: ', i_dec.shape
+    print 'i_coords.shape: ', i_coords.shape
+    # solve for RA, dec at those coords
+    img_coords = wcs.wcs_pix2sky(i_coords, 1)
+    img_coords = np.reshape(img_coords,(i_ra.shape[0],i_ra.shape[1],2))
+    ra  = img_coords[:,:,0]
+    dec = img_coords[:,:,1]
+
+    # initialize machinery for solving for bias
+
+    mask = np.where(AV_img > 0, 1.0, 0.0)
+    hiAVmask = np.where(AV_img > 0.25, 1.0, 0.0)
+    loAVmask = np.where((0 < AV_img) & (AV_img <= 0.25), 1.0, 0.0)
+    i_good = np.where(mask > 0)
+    i_hiAV = np.where(hiAVmask > 0)
+    i_loAV = np.where(loAVmask > 0)
+    AVratio = draineimg / AV_img 
+    meanAVratio = draineimg / meanAV_img
+
+    # Loop through possible bias corrections
+    nbias = 51.
+    nR = 76.
+    biasrange = [0, 1]
+    Rrange = [0.5, 3.0]
+    biasvec = np.linspace(biasrange[0], biasrange[1], nbias)
+    Rvec = np.linspace(Rrange[0], Rrange[1], nR)
+    chi2vec = np.zeros((nbias, nR))
+    AVlim = 0.625
+
+    i_good = np.where(AV_img > AVlim)
+        
+    for i, R in enumerate(Rvec):
+
+        for j, bias in enumerate(biasvec):
+
+            diff = AVratio[i_good] - R*(1. + bias/meanAV_img[i_good])
+            chi2 = diff**2
+
+            chi2vec[j, i] = np.sum(chi2) / len(chi2)
+
+    minchi2 = np.min(chi2vec)
+    i_minchi2 = np.where(chi2vec == minchi2)   # there's a way to do this with np.argmin...
+    minRglobal, minbiasglobal = Rvec[i_minchi2[1][0]], biasvec[i_minchi2[0][0]]
     
+    print 'Best Fit for whole distribution: ',minRglobal, minbiasglobal
+    
+    plt.figure(1)
+    plt.clf()
+    im = plt.imshow(chi2vec, vmax=4.,
+                    extent=[Rrange[0], Rrange[1], biasrange[0], biasrange[1]], aspect='auto', origin='lower',
+                    cmap='gist_ncar', interpolation='nearest')
+    plt.colorbar(im)
+    plt.plot(minRglobal, minbiasglobal, '*', markersize=20, color='white')
+    plt.xlabel('$A_V$ Ratio (Emission / Extinction)')
+    plt.ylabel(r'$\langle A_V \rangle$ Bias')
+    plt.suptitle('Fitting $\widetilde{A_V} > %5.3f$' % AVlim)
+    
+    # set up info to analyze bias as a function of ln-nstar
+
+    nlgnstarbins = 16.
+    nsubplot = 4
+    nlgnstarbins = 25.
+    nsubplot = 5
+    nlgnstarbins = 36.
+    nsubplot = 6
+    lgnstar = np.log10(iAV.get_nstar_at_ra_dec(ra, dec, renormalize_to_surfdens=True))
+    minlgnstar = min(lgnstar[i_good])
+    maxlgnstar = 0   # artificial, but inner parts are crap
+    lgnstaredgevec = np.linspace(minlgnstar, maxlgnstar, nlgnstarbins+1)
+    lgnstarvec = (lgnstaredgevec[:-1] + lgnstaredgevec[1:]) / 2.0
+    chi2array = np.zeros((nbias, nR, nlgnstarbins))
+    minRvec = np.zeros(nlgnstarbins)
+    minbiasvec = np.zeros(nlgnstarbins)
+
+    for k, lgnstarval in enumerate(lgnstarvec):
+
+        i_keep = np.where((lgnstaredgevec[k] < lgnstar) &
+                          (lgnstar <= lgnstaredgevec[k+1]) &
+                          (AV_img > AVlim))
+
+        chi2tmp = np.zeros((nbias, nR))
+        for i, R in enumerate(Rvec):
             
+            for j, bias in enumerate(biasvec):
+                
+                diff = AVratio[i_keep] - R*(1. + bias/meanAV_img[i_keep])
+                chi2 = diff**2
+                
+                chi2tmp[j, i] = np.sum(chi2) / len(chi2)
+                chi2array[j, i, k] = np.sum(chi2) / len(chi2)
+                
+        minchi2 = np.min(chi2tmp)
+        i_minchi2 = np.where(chi2tmp == minchi2)   # there's a way to do this with np.argmin...
+        minR, minbias = Rvec[i_minchi2[1][0]], biasvec[i_minchi2[0][0]]
+        minRvec[k] = minR
+        minbiasvec[k] = minbias
+        print 'Best Fit for lgn ',lgnstarval,' is ',minR, minbias
+        
+    # plot ratio, bias chi2 distributions as a function of lgnstar
+
+    plt.figure(20)
+    plt.close()
+    plt.figure(20, figsize=(13,10))
+
+    for i, lgnstarval in enumerate(lgnstarvec):
+
+        plt.subplot(nsubplot, nsubplot, i + 1)
+        im = plt.imshow(chi2array[:,:,i], vmax=4.,
+                        extent=[Rrange[0], Rrange[1], biasrange[0], biasrange[1]], 
+                        aspect='auto', origin='lower',
+                        cmap='gist_ncar', interpolation='nearest')
+        plt.plot(minRglobal, minbiasglobal, '*', markersize=20, color='red')
+        plt.plot(minRvec[i], minbiasvec[i], '*', markersize=20, color='white')
+
+        plt.annotate(r'$\log_{10} N_{star} = %5.2f$' % lgnstarvec[i], 
+                     xy=(0.95, 0.90), fontsize=10, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+
+    plt.suptitle('Fitting $\widetilde{A_V} > %5.3f$' % AVlim)
+ 
+   # plot ratio, bias solutions distributions as a function of lgnstar
+
+    plt.figure(21)
+    plt.close()
+    plt.figure(21, figsize=(13,10))
+
+    AVvec = np.linspace(0,5,50)
+    greyval = '#B3B3B3'
+
+    for i, lgnstarval in enumerate(lgnstarvec):
+
+        i_keep = np.where((lgnstaredgevec[i] < lgnstar) &
+                          (lgnstar <= lgnstaredgevec[i+1]) &
+                          (AV_img > AVlim))
+        i_all = np.where((lgnstaredgevec[i] < lgnstar) &
+                         (lgnstar <= lgnstaredgevec[i+1]) &
+                         (AV_img > 0.25))
+
+        plt.subplot(nsubplot, nsubplot, i + 1)
+        plt.plot(meanAV_img[i_all], meanAVratio[i_all], ',', color=greyval) 
+        plt.plot(meanAV_img[i_keep], meanAVratio[i_keep], ',', color='black') 
+        plt.plot(AVvec, (1. + minbiasglobal/AVvec) * minRglobal, color='blue')
+        plt.plot(AVvec, (1. + minbiasvec[i]/AVvec) * minRvec[i], color='red', )
+        plt.plot(AVvec, 2.4 + 0.0*AVvec, color='green')
+        plt.axis([0, 1.025*max(meanAV_img[i_keep]), 0, 7])
+        plt.annotate(r'$\log_{10} N_{star} = %5.2f$' % lgnstarvec[i], 
+                     xy=(0.95, 0.90), fontsize=10, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+        plt.annotate(r'${\rm Bias} = %4.2f$' % minbiasvec[i], 
+                     xy=(0.95, 0.15), fontsize=10, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+        plt.annotate(r'${\rm Ratio} = %4.2f$' % minRvec[i], 
+                     xy=(0.95, 0.05), fontsize=10, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+
+
+    plt.figure(14)
+    plt.close()
+    plt.figure(14, figsize=(10,10))
+    plt.plot(lgnstarvec, minbiasvec)
+    plt.xlabel(r'$\log_{10} N_{star}$')
+    plt.ylabel('Bias')
+
+    plt.figure(15)
+    plt.close()
+    plt.figure(15, figsize=(10,10))
+    plt.plot(lgnstarvec, minRvec)
+    plt.xlabel(r'$\log_{10} N_{star}$')
+    plt.ylabel('Ratio')
+
+    return
+
+    # Scatter plot of ratio, color coded by lg10 Nstar
+
+    plt.figure(21)
+    plt.close()
+    plt.figure(21, figsize=(10,10))
+    im = plt.plot(meanAV_img[i_loAV], draineimg[i_loAV] / meanAV_img[i_loAV], ',', 
+                  color=greyval)
+    # shuffling such a large array is too slow!
+    #i_hiAV_shuffle = np.array(copy.deepcopy(i_hiAV))
+    #random.shuffle(i_hiAV_shuffle)
+    im = plt.scatter(meanAV_img[i_hiAV], 
+                     draineimg[i_hiAV] / meanAV_img[i_hiAV], 
+                     c=lgnstar[i_hiAV], 
+                     cmap='jet_r', s=7, linewidth=0, vmin=-1.4, vmax=0.4)
+    plt.colorbar(im)
+    plt.xlabel(r'$\langle A_V \rangle$')
+    plt.ylabel(r'$A_{V,emission}  /  \langle A_V \rangle$')
+    plt.axis([0, 3.5, 0, 7])
+
+
+    # plot bias results
+
+    plt.figure(10)
+    plt.close()
+    plt.figure(10, figsize=(10,10))
+    
+    for i, AVlim in enumerate(Rvec):
+        plt.plot(biasvec, (stddevvec / meanvec)[:,i], linewidth=1+2*i)
+        plt.plot(minbiasvec[i], (stddevvec / meanvec)[i_minbiasvec[i],i], 'o', color='black')
+
+    plt.xlabel('Bias')
+    plt.ylabel(r'$\sigma_{\rm Ratio}  /  {\rm Ratio}$')
+
+    plt.figure(11)
+    plt.close()
+    plt.figure(11, figsize=(10,10))
+    
+    for i, AVlim in enumerate(Rvec):
+        plt.plot(biasvec, medianvec[:,i], linewidth=1+2*i)
+        plt.plot(minbiasvec[i], medianvec[i_minbiasvec[i],i], 'o', color='black')
+        print 'AVlim: ',AVlim, ' Minimum Stddev/Ratio at bias = ', biasvec[i_minstd],'  Ratio: ',medianvec[i_minbiasvec[i],i]
+
+    plt.xlabel('Bias')
+    plt.ylabel('Median Ratio')
+
+    return
+
+
+            
+        
+        
+        
+        
+    
+
+    ################################################
+    # Make plots
+
+    # set image region
+
+    region1 = [11.05, 41.32, 0.47, 0.45]   # brick 5 + SF ring
+
+    # Redefine fits files, in case write_fits='False'
+
+    output_smooth_AV_file = output_smooth_AV_root + '.fits'
+    output_smooth_meanAV_file = output_smooth_meanAV_root + '.fits'
+
+    # image of AV ratio
+
+    gc = aplpy.FITSFigure(output_smooth_AV_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=4, cmap='hot', 
+                       interpolation='nearest', aspect='auto')
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$A_V$')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+    filename = output_smooth_AV_root + '.region1' + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # image of meanAV ratio
+
+    gc = aplpy.FITSFigure(output_smooth_meanAV_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=4, cmap='hot', 
+                       interpolation='nearest', aspect='auto')
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$A_V$')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+    filename = output_smooth_meanAV_root + '.region1' + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # adopt larger fonts and set alpha value
+
+    print 'Increasing font size...'
+    
+    font = {'weight': '500',
+            'size': '18'}
+    plt.rc('font', **font)
+    
+    alpha = 1.0
+    greyval = '#B3B3B3'
+    plotfigsize = (10.0,10.0)
+
+    # Correlation plot AV  (ghost out low AV points)
+
+    plt.figure(1, figsize=plotfigsize)
+    plt.close()
+    plt.figure(1, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(AV_img[i_loAV], draineimg[i_loAV], ',', color=greyval, alpha=alpha)
+    im = plt.plot(AV_img[i_hiAV], draineimg[i_hiAV], ',', color='black', alpha=alpha)
+    plt.xlabel(r'$\widetilde{A_V}$')
+    plt.ylabel(r'$A_{V,emission}$')
+    plt.axis([0, 3.5, 0, 12])
+    
+    exten = '.correlation'
+    savefile = output_smooth_AV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # Correlation plot meanAV (ghost out low AV points)
+
+    plt.figure(2, figsize=plotfigsize)
+    plt.close()
+    plt.figure(2, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(meanAV_img[i_loAV], draineimg[i_loAV], ',', color=greyval, alpha=alpha)
+    im = plt.plot(meanAV_img[i_hiAV], draineimg[i_hiAV], ',', color='black', alpha=alpha)
+    plt.xlabel(r'$\langle A_V \rangle$')
+    plt.ylabel(r'$A_{V,emission}$')
+    plt.axis([0, 3.5, 0, 12])
+    
+    exten = '.correlation'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # Ratio plot AV  (ghost out low AV points)
+
+    plt.figure(3, figsize=plotfigsize)
+    plt.close()
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(AV_img[i_loAV], draineimg[i_loAV] / AV_img[i_loAV], ',', color=greyval, alpha=alpha)
+    im = plt.plot(AV_img[i_hiAV], draineimg[i_hiAV] / AV_img[i_hiAV], ',', color='black', alpha=alpha)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$A_{V,emission}  /  \widetilde{A_V}$')
+    plt.axis([0, 3.5, 0, 7])
+    
+    exten = '.ratio'
+    savefile = output_smooth_AV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # Ratio plot meanAV  (ghost out low AV points)
+
+    plt.figure(4, figsize=plotfigsize)
+    plt.close()
+    plt.figure(4, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(meanAV_img[i_loAV], draineimg[i_loAV] / meanAV_img[i_loAV], ',', 
+                  color=greyval, alpha=alpha)
+    im = plt.plot(meanAV_img[i_hiAV], draineimg[i_hiAV] / meanAV_img[i_hiAV], ',', 
+                  color='black', alpha=alpha)
+    plt.xlabel(r'$\langle A_V \rangle$')
+    plt.ylabel(r'$A_{V,emission}  /  \langle A_V \rangle$')
+    plt.axis([0, 3.5, 0, 7])
+    
+    exten = '.ratio'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # restore font size
+
+    print 'Restoring original font defaults...'
+    plt.rcdefaults()
+
+    return
+
+
 # read in image, and match resolution & astrometry of extinction map to it
-def compare_img_to_AV(AV, ra_bins, dec_bins, imgfile, resolution_in_arcsec='', scaleimgfactor=1.0,
+def compare_img_to_AV(AV, ra_bins, dec_bins, imgfile, AV_resolution_in_arcsec=6.645, 
+                      resolution_in_arcsec='', scaleimgfactor=1.0,
                       crop='True', outputAVfile='', 
                       usemeanAV=True):
 
@@ -1082,14 +1533,24 @@ def compare_img_to_AV(AV, ra_bins, dec_bins, imgfile, resolution_in_arcsec='', s
     ddec = dec_bins[1] - dec_bins[0]
     pixscale = 3600.0 * (dra + ddec) / 2.0
 
+    print 'Size of AV image: ', AV.shape
     if (resolution_in_arcsec != ''): 
-        smootharcsec = np.sqrt(resolution_in_arcsec**2 - pixscale**2)
-        smoothpix = smootharcsec / pixscale
+        smootharcsec = np.sqrt(resolution_in_arcsec**2 - AV_resolution_in_arcsec**2)
+        smoothpix = (smootharcsec / pixscale) / 2.0  # since resolution=FWHM
         print 'Smoothing to ',resolution_in_arcsec,' using ',smoothpix,' pixel wide filter'
 
-        AVsmooth = filt.gaussian_filter(AV, smoothpix, mode='reflect')
+        AVsmooth = filt.gaussian_filter(AV, smoothpix, mode='reflect')  
     else:
         AVsmooth = AV
+
+    print 'AVsmooth size: ', AVsmooth.shape
+    plt.figure(1)
+    plt.clf()
+    plt.imshow(AV, vmin=0, vmax=4, cmap='hot')
+
+    plt.figure(2)
+    plt.clf()
+    plt.imshow(AVsmooth, vmin=0, vmax=4, cmap='hot')
 
     # interpolate ra on ra_bins and dec on dec_bins to get coordinates in AV image
     # grab nearest pixel in A_V image (possible off-by-one?) and copy into copy of img
@@ -1153,7 +1614,7 @@ def compare_draine_dust(AV, ra_bins, dec_bins):
     resolution = 10.0  # arcsec
     #resolution = ''  # arcsec
     outputfile = '../Results/FirstRun/draine_matched_AV.fits'
-    scalefac = 0.74 / 1.e5  # Draine email May 29, 2013
+    scalefac = 0.739 / 1.e5  # Draine email May 29, 2013
 
     #wcs, im_coords, img, AV_img = compare_img_to_AV(drainefile, crop='True',
     wcs, im_coords, img, AV_img = compare_img_to_AV(AV, ra_bins, dec_bins, drainefile, crop='True',
@@ -1720,14 +2181,142 @@ def plot_dense_gas(filename='merged.npz', resultsdir='../Results/', AKthresh=0.1
 
     return
 
-def interleave_maps(fileroot = 'ir-sf-b15-v8-st',
+def makeinterleaved_fits(fileroot='merged', resultsdir='../Results/',
+                         cleanstr = '_clean'):
+
+    # median extinction
+    exten = '.AV'
+    arrayname = 'bestfit_values' + cleanstr
+    arraynum = 1
+    a, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                              arrayname=arrayname, 
+                              arraynum=arraynum)
+    fitsfile = resultsdir + fileroot + '_interleave' + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, a, x, y)
+    AV = a
+
+    # mean extinction
+    exten = '.meanAV'
+    if (fileroot == 'merged'):
+        arrayname = 'dervied_values' + cleanstr  #  note mispelling!
+    else:
+        arrayname = 'derived_values' + cleanstr
+    arraynum = 0
+    a, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                              arrayname=arrayname, 
+                              arraynum=arraynum)
+    fitsfile = resultsdir + fileroot + '_interleave' + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, a, x, y)
+    meanAV = a
+
+    # reddening fraction
+    exten = '.fred'
+    arrayname = 'bestfit_values' + cleanstr
+    arraynum = 0
+    a, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                              arrayname=arrayname, 
+                              arraynum=arraynum)
+    fitsfile = resultsdir + fileroot + '_interleave' + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, a, x, y)
+    fred = a
+
+    # sigma
+    exten = '.sigma'
+    arrayname = 'bestfit_values' + cleanstr
+    arraynum = 2
+    a, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                              arrayname=arrayname, 
+                              arraynum=arraynum)
+    fitsfile = resultsdir + fileroot + '_interleave' + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, a, x, y)
+    sigma = a
+
+    # uncertainties
+
+    exten = '.AVerr'
+    arrayname = 'percentile_values'
+    arraynum = 3
+    a1, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    arraynum = 5
+    a2, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    fitsfile = resultsdir + fileroot + '_interleave' + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, (a2 - a1)/2.0, x, y)
+    exten = '.AVfracerr'
+    fitsfile = resultsdir + fileroot + '_interleave' + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, ((a2 - a1)/2.0) / AV, x, y)
+
+
+    exten = '.meanAVerr'
+    arrayname = 'derived_percentile_values'
+    arraynum = 0
+    a1, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    arraynum = 2
+    a2, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    fitsfile = resultsdir + fileroot + '_interleave' + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, (a2 - a1)/2.0, x, y)
+    exten = '.meanAVfracerr'
+    fitsfile = resultsdir + fileroot + '_interleave' + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, ((a2 - a1)/2.0) / meanAV, x, y)
+
+
+    exten = '.frederr'
+    arrayname = 'percentile_values'
+    arraynum = 0
+    a1, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    arraynum = 2
+    a2, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    fitsfile = resultsdir + fileroot + '_interleave' + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, (a2 - a1)/2.0, x, y)
+
+    exten = '.sigmaerr'
+    arrayname = 'percentile_values'
+    arraynum = 6
+    a1, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    arraynum = 8
+    a2, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    fitsfile = resultsdir + fileroot + '_interleave' + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, (a2 - a1)/2.0, x, y)
+    exten = '.sigmafracerr'
+    fitsfile = resultsdir + fileroot + '_interleave' + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, ((a2 - a1)/2.0) / sigma, x, y)
+
+    return
+
+def interleave_maps(fileroot = 'ir-sf-b16-v8-st',
                     file_0='.05_0', 
                     file_1='', 
                     file_2='.0_05', 
                     file_3='.05_05', 
                     resultsdir='../Results/',
                     arrayname='bestfit_values_clean',
-                    arraynum=1):
+                    arraynum=0):
 
     print 'File_1: ', file_1
     print 'File_3: ', file_3
@@ -1737,8 +2326,9 @@ def interleave_maps(fileroot = 'ir-sf-b15-v8-st',
     d_2 = np.load(resultsdir + fileroot + file_2 + '.npz')
     d_3 = np.load(resultsdir + fileroot + file_3 + '.npz')
 
-    arrayname='dervied_values_clean'
-    arraynum=0
+    #arrayname='dervied_values_clean'
+    #arraynum=0
+    print 'Grabbing entry from ', arrayname,'[:,:,',arraynum,']'
     bf_0 = d_0[arrayname][:,:,arraynum]
     bf_1 = d_1[arrayname][:,:,arraynum]
     bf_2 = d_2[arrayname][:,:,arraynum]
@@ -1841,11 +2431,29 @@ def interleave(array_dict, xbins_dict, ybins_dict):
 
     return output_grid, output_xbins, output_ybins
 
-def plot_AV_map(fitsimage):
+def plot_final_maps(fitsimageroot='../Results/merged_interleave', 
+                AVexten='.AV', fredexten='.fred',
+                imgexten='.png'):
 
-    gc = aplpy.FITSFigure(fitsimage, convention='wells', figsize=(10,11))
-    gc.show_colorscale(vmin=0, vmax=4, cmap='gist_heat', 
-                       interpolation='nearest', aspect='equal')
+    region1 = [11.05, 41.32, 0.47, 0.45]   # brick 5 + SF ring
+    region2 = [11.29, 41.8,  0.55, 0.5]    # brick 9 + brick 15 region
+    region3 = [11.585, 42.1, 0.55, 0.5]
+    nregions = 3
+    regions = [region1, region2, region3]
+
+    fitsimagerootAV = fitsimageroot + AVexten
+    fitsimagerootfred = fitsimageroot + fredexten
+
+    # plot mean AV images
+    filename = fitsimagerootAV + '.fits'
+    print 'Opening ', filename
+    # FYI, next step slow because of "north" convention swapping image
+    # orientation.
+    gc = aplpy.FITSFigure(filename, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=4, cmap='hot', 
+                       interpolation='nearest', aspect='auto')
 
     gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
 
@@ -1859,6 +2467,839 @@ def plot_AV_map(fitsimage):
     gc.colorbar.set_location('right')
     gc.colorbar.set_axis_label_text('$A_V$')
 
+    filename = fitsimagerootAV + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # loop through subregions
+
+    for i in range(nregions):
+
+        r = regions[i]
+        gc.recenter(r[0], r[1], width=r[2], height=r[3])
+        filename = fitsimagerootAV + '.region' + str(i+1) + imgexten
+        print 'Saving ', filename
+        gc.save(filename, adjust_bbox='True')
+
+    # plot fred
+    filename = fitsimagerootfred + '.fits'
+    print 'Opening ', filename
+    # FYI, next step slow because of "north" convention swapping image
+    # orientation.
+    gc = aplpy.FITSFigure(filename, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=1, cmap='seismic', 
+                       interpolation='nearest', aspect='auto')
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$f_{red}$')
+
+    filename = fitsimagerootfred + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # loop through subregions
+
+    for i in range(nregions):
+
+        r = regions[i]
+        gc.recenter(r[0], r[1], width=r[2], height=r[3])
+        filename = fitsimagerootfred + '.region' + str(i+1) + imgexten
+        print 'Saving ', filename
+        gc.save(filename, adjust_bbox='True')
+
+    return
+
+def plot_final_brick_example(fileroot = 'ir-sf-b16-v8-st',
+                             resultsdir = '../Results/',
+                             imgexten='.png'):
+
+    mapfigsize  = (14.0,9.5)
+    plotfigsize = (10.0,10.0)
+
+    print 'Increasing font size...'
+    
+    font = {'weight': '500',
+            'size': '24'}
+    plt.rc('font', **font)
+
+    # uses fits files that result from
+    # makeinterleaved_fits(fileroot='ir-sf-b16-v8-st', cleanstr='')
+
+    results_file = resultsdir + fileroot + '.npz'
+
+    # median extinction
+    arrayname = 'bestfit_values'
+    arraynum = 1
+    AV, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+
+    # f_red
+    arrayname = 'bestfit_values'
+    arraynum = 0
+    fred, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                                 arrayname=arrayname, 
+                                 arraynum=arraynum)
+
+    # sigma
+    arrayname = 'bestfit_values'
+    arraynum = 2
+    sigma, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                                  arrayname=arrayname, 
+                                  arraynum=arraynum)
+
+    # AVerr
+    arrayname = 'percentile_values'
+    arraynum = 3
+    a1, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    arraynum = 5
+    a2, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    AVerr = (a2 - a1) / 2.0
+
+    # frederr
+    arrayname = 'percentile_values'
+    arraynum = 0
+    a1, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    arraynum = 2
+    a2, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    frederr = (a2 - a1) / 2.0
+
+    # sigmaerr
+    arrayname = 'percentile_values'
+    arraynum = 6
+    a1, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    arraynum = 8
+    a2, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                               arrayname=arrayname, 
+                               arraynum=arraynum)
+    sigmaerr = (a2 - a1) / 2.0
+
+    # numstars
+    arrayname = 'quality_values'
+    arraynum = 1
+    a, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                              arrayname=arrayname, 
+                              arraynum=arraynum)
+    nstars = a
+
+    # lnlikelihood
+    arrayname = 'quality_values'
+    arraynum = 0
+    a, x, y = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                              arrayname=arrayname, 
+                              arraynum=arraynum)
+    lnlikelihood = a
+
+
+    dat = np.load(results_file)
+    rabin = x
+    decbin = y
+    print 'rabin:  ', len(rabin), '[', min(rabin), ',', max(rabin), ']'
+    print 'decbin: ', len(decbin), '[', min(decbin), ',', max(decbin), ']'
+    rangevec = [max(decbin), min(decbin), max(rabin), min(rabin)]
+    dra = (max(rabin) - min(rabin)) * np.sin((min(decbin) + max(decbin))/2.0)
+    ddec = min(decbin) + max(decbin)
+    
+    # Best fit results
+
+    fitsimageroot = resultsdir + fileroot + '_interleave'
+    fitsimagerootAV = fitsimageroot + '.AV'
+    fitsimagerootmeanAV = fitsimageroot + '.meanAV'
+    fitsimagerootfred = fitsimageroot + '.fred'
+    fitsimagerootsigma = fitsimageroot + '.sigma'
+    fitsimagerootAVfracerr = fitsimageroot + '.AVfracerr'
+    fitsimagerootmeanAVfracerr = fitsimageroot + '.meanAVfracerr'
+    fitsimagerootfrederr = fitsimageroot + '.frederr'
+    fitsimagerootsigmaerr = fitsimageroot + '.sigmaerr'
+    fitsimagerootsigmafracerr = fitsimageroot + '.sigmafracerr'
+
+    # AV map
+
+    filename = fitsimagerootAV + '.fits'
+    print 'Opening ', filename
+    gc = aplpy.FITSFigure(filename, convention='wells', 
+                          figsize=mapfigsize,
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=4, cmap='hot', 
+                       interpolation='nearest', aspect='auto')
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('Median $A_V$')
+
+    filename = fitsimagerootAV + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # meanAV map
+
+    filename = fitsimagerootmeanAV + '.fits'
+    print 'Opening ', filename
+    gc = aplpy.FITSFigure(filename, convention='wells', 
+                          figsize=mapfigsize,
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=4, cmap='hot', 
+                       interpolation='nearest', aspect='auto')
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('Mean $A_V$')
+
+    filename = fitsimagerootmeanAV + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # fred map
+
+    filename = fitsimagerootfred + '.fits'
+    print 'Opening ', filename
+    gc = aplpy.FITSFigure(filename, convention='wells', 
+                          figsize=mapfigsize,
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=1, cmap='seismic', 
+                       interpolation='nearest', aspect='auto')
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$f_{red}$')
+
+    filename = fitsimagerootfred + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # sigma map
+
+    filename = fitsimagerootsigma + '.fits'
+    print 'Opening ', filename
+    gc = aplpy.FITSFigure(filename, convention='wells', 
+                          figsize=mapfigsize,
+                          north='True')
+    gc.show_colorscale(vmin=0.2, vmax=0.6, cmap='jet', 
+                       interpolation='nearest', aspect='auto')
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$\sigma$')
+
+    filename = fitsimagerootsigma + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # Uncertainty results
+
+    # AV fracerr map
+
+    filename = fitsimagerootAVfracerr + '.fits'
+    print 'Opening ', filename
+    gc = aplpy.FITSFigure(filename, convention='wells', 
+                          figsize=mapfigsize,
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=1, cmap='gist_ncar', 
+                       interpolation='nearest', aspect='auto')
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$\Delta \widetilde{A_V} / \widetilde{A_V}$')
+
+    filename = fitsimagerootAVfracerr + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # meanAV fracerr map
+
+    filename = fitsimagerootmeanAVfracerr + '.fits'
+    print 'Opening ', filename
+    gc = aplpy.FITSFigure(filename, convention='wells', 
+                          figsize=mapfigsize,
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=1, cmap='gist_ncar', 
+                       interpolation='nearest', aspect='auto')
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(r'$\Delta \langle A_V \rangle / \langle A_V  \rangle$')
+
+    filename = fitsimagerootmeanAVfracerr + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # fred err map
+
+    filename = fitsimagerootfrederr + '.fits'
+    print 'Opening ', filename
+    gc = aplpy.FITSFigure(filename, convention='wells', 
+                          figsize=mapfigsize,
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=0.5, cmap='gist_ncar', 
+                       interpolation='nearest', aspect='auto')
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$\Delta f_{red}$')
+
+    filename = fitsimagerootfrederr + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # sigma fracerr map
+
+    filename = fitsimagerootsigmafracerr + '.fits'
+    print 'Opening ', filename
+    gc = aplpy.FITSFigure(filename, convention='wells', 
+                          figsize=mapfigsize,
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=1, cmap='gist_ncar', 
+                       interpolation='nearest', aspect='auto')
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$\Delta\sigma / \sigma$')
+
+    filename = fitsimagerootsigmafracerr + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    ####################################################
+
+    # Best fit value scatter plots
+
+    scatteralpha=1.0
+    print 'Plotting scatter plots...'
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(AV, fred, c=sigma, s=7, linewidth=0, alpha=scatteralpha, 
+                     vmin=0.2, vmax=0.8)
+    plt.colorbar(im)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$f_{red}$')
+    plt.axis([0, 5, 0, 1.0])
+    plt.annotate(r"$\sigma$",xy=(0.9,0.9), xycoords='axes fraction', xytext=None,
+                 horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.AV_vs_fred_sigma_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(fred,sigma,c=AV,s=7,linewidth=0,alpha=scatteralpha,
+                     vmin=0, vmax=4)
+    plt.colorbar(im)
+    plt.xlabel('$f_{red}$')
+    plt.ylabel('$\sigma$')
+    plt.axis([0, 1.0, 0, 1])
+    plt.annotate(r"$\widetilde{A_V}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.fred_vs_sigma_AV_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(AV,sigma,c=fred,s=7,linewidth=0,alpha=scatteralpha,
+                     vmin=0, vmax=0.75)
+    plt.colorbar(im)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$\sigma$')
+    plt.axis([0, 5, 0, 1])
+    plt.annotate(r"$f_{red}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.AV_vs_sigma_fred_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(AV,sigma,c=lnlikelihood,s=7,linewidth=0,alpha=scatteralpha,
+                     vmin=-6.3, vmax=-4.8, cmap='jet_r')
+    plt.colorbar(im)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$\sigma$')
+    plt.axis([0, 5, 0, 1])
+    plt.annotate(r"Log ${\mathcal{L}}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.AV_vs_sigma_lnlike_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(AV, fred, c=lnlikelihood, s=7, linewidth=0, alpha=scatteralpha, 
+                     vmin=-6.3, vmax=-4.8, cmap='jet_r')
+    plt.colorbar(im)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$f_{red}$')
+    plt.axis([0, 5, 0, 1.0])
+    plt.annotate(r"Log ${\mathcal{L}}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.AV_vs_fred_lnlike_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(fred,sigma,c=lnlikelihood,s=7,linewidth=0,alpha=scatteralpha,
+                     vmin=-6.3, vmax=-4.8, cmap='jet_r')
+    plt.colorbar(im)
+    plt.xlabel('$f_{red}$')
+    plt.ylabel('$\sigma$')
+    plt.axis([0, 1.0, 0, 1])
+    plt.annotate(r"Log ${\mathcal{L}}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.fred_vs_sigma_lnlike_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    plt.draw()
+
+    #################################
+    # Uncertainty scatter plots, vs A_V on x-axis
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(AV, AVerr/AV, c=nstars, s=7, linewidth=0, 
+                     alpha=scatteralpha, cmap='jet_r',
+                     vmin=25, vmax=125)
+    plt.colorbar(im)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$\Delta\widetilde{A_V} / \widetilde{A_V}$')
+    plt.axis([0, 5, 0, 1.5])
+    plt.annotate(r"$N_{stars}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.AV_vs_AVfracerr_nstars_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(AV, AVerr/AV, c=lnlikelihood, s=7, linewidth=0, 
+                     alpha=scatteralpha,  cmap='jet_r',
+                     vmin=-6.3, vmax=-4.8)
+    plt.colorbar(im)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$\Delta\widetilde{A_V} / \widetilde{A_V}$')
+    plt.axis([0, 5, 0, 1.5])
+    plt.annotate(r"Log ${\mathcal{L}}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.AV_vs_AVfracerr_lnlike_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(AV, frederr, c=nstars, s=7, linewidth=0, 
+                     alpha=scatteralpha,  cmap='jet_r',
+                     vmin=25, vmax=125)
+    plt.colorbar(im)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$\Delta f_{red}$')
+    plt.axis([0, 5, 0, 0.5])
+    plt.annotate(r"$N_{stars}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.AV_vs_frederr_nstars_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(AV, frederr, c=lnlikelihood, s=7, linewidth=0, 
+                     alpha=scatteralpha,  cmap='jet_r',
+                     vmin=-6.3, vmax=-4.8)
+    plt.colorbar(im)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$\Delta f_{red}$')
+    plt.axis([0, 5, 0, 0.5])
+    plt.annotate(r"Log ${\mathcal{L}}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.AV_vs_frederr_lnlike_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(AV, sigmaerr/sigma, c=nstars, s=7, linewidth=0,
+                     alpha=scatteralpha,  cmap='jet_r',
+                     vmin=25, vmax=125)
+    plt.colorbar(im)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$\Delta\sigma / \sigma$')
+    plt.axis([0, 5, 0, 1.5])
+    plt.annotate(r"$N_{stars}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.AV_vs_sigmafracerr_nstars_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(AV, sigmaerr/sigma, c=lnlikelihood, s=7, linewidth=0,
+                     alpha=scatteralpha,  cmap='jet_r',
+                     vmin=-6.3, vmax=-4.8)
+    plt.colorbar(im)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$\Delta\sigma / \sigma$')
+    plt.axis([0, 5, 0, 1.5])
+    plt.annotate(r"Log ${\mathcal{L}}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.AV_vs_sigmafracerr_lnlike_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+
+    print 'Restoring original font defaults...'
+    plt.rcdefaults()
+
     return
 
 
+
+    plt.figure(5)
+    plt.close()
+    fig5 = plt.figure(5, figsize=plotfigsize)
+    plt.clf()
+    plt.suptitle(brickname)
+
+    plt.subplot(2,2,1)
+    im = plt.scatter(fred, AVerr/fred, c=AV,
+                     s=7, linewidth=0, alpha=scatteralpha, 
+                     vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\Delta A_V / A_V$')
+    plt.axis([0, 5, 0, 1.5])
+    
+    plt.subplot(2,2,2)
+    im = plt.scatter(fred, frederr, c=AV,
+                     s=7, linewidth=0, alpha=scatteralpha,
+                     vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\Delta f_{red}$')
+    plt.axis([0, 5, 0, 0.35])
+    
+    plt.subplot(2,2,3)
+    im = plt.scatter(fred, sigmaerr / (sigma), c=AV,
+                     s=7, linewidth=0, alpha=scatteralpha,
+                     vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\Delta \sigma / \sigma)$')
+    plt.axis([0, 5, 0, 1])
+
+    if (pngroot != ''):
+        plt.savefig(pngroot + '.5.png', bbox_inches=0)
+        
+    return
+
+def plot_optical_comparison_images(imgroot = 'andromeda_gendler-3color',
+                                   imgdir = '../../Images/',
+                                   outputdir = '../Results/',
+                                   imgexten = '.png'):
+
+    region1 = [11.05, 41.32, 0.47, 0.45]   # brick 5 + SF ring
+    region2 = [11.29, 41.8,  0.55, 0.5]    # brick 9 + brick 15 region
+    region3 = [11.585, 42.1, 0.55, 0.5]
+    nregions = 3
+    regions = [region1, region2, region3]
+
+    # set figsize to match plot_final
+    figsize = (10.5, 10.5)
+
+    # assumes have already run:
+    # extract_layers_from_rgb_fits(imgroot)
+
+    fileroot = imgdir + imgroot
+
+    fitsfilename = fileroot + '.fits'
+    print 'Displaying ', fitsfilename
+    gc = aplpy.FITSFigure(fitsfilename,north='True', 
+                          figsize=figsize)    
+    gc.show_grayscale(aspect='auto', invert='True')
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+    
+    print 'Generating sub-region images...'
+    for i in range(nregions):
+
+        r = regions[i]
+        gc.recenter(r[0], r[1], width=r[2], height=r[3])
+        filename = outputdir + imgroot + '.region' + str(i+1) + imgexten
+        print 'Saving ', filename
+        gc.save(filename, adjust_bbox='True')
+
+    return
+
+def plot_draine_comparison_images(imgroot = 'draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.AV',
+                                  imgdir = '../',
+                                  outputdir = '../Results/',
+                                  imgexten = '.png',
+                                  rescale = 2.2):
+
+    region1 = [11.05, 41.32, 0.47, 0.45]   # brick 5 + SF ring
+    region2 = [11.29, 41.8,  0.55, 0.5]    # brick 9 + brick 15 region
+    region3 = [11.585, 42.1, 0.55, 0.5]
+    nregions = 3
+    regions = [region1, region2, region3]
+
+    # set figsize to match plot_final, but then adjust for colorbar
+    widthadjust = 0.3
+    figsize = (10.5 - widthadjust,10.5)
+
+    # assumes have already run:
+    # extract_layers_from_rgb_fits(imgroot)
+
+    fileroot = imgdir + imgroot
+
+    fitsfilename = fileroot + '.fits'
+    print 'Displaying ', fitsfilename
+    gc = aplpy.FITSFigure(fitsfilename,north='True', 
+                          figsize=figsize)    
+    gc.show_colorscale(vmin=0, vmax=4.0 * rescale, cmap='hot', 
+                       interpolation='nearest', aspect='auto')
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$A_V$')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+    
+    print 'Generating sub-region images...'
+    for i in range(nregions):
+
+        r = regions[i]
+        gc.recenter(r[0], r[1], width=r[2], height=r[3])
+        filename = outputdir + imgroot + '.region' + str(i+1) + imgexten
+        print 'Saving ', filename
+        gc.save(filename, adjust_bbox='True')
+
+    return
+
+def plot_gas_comparison_images(imgroot = 'm31_HI_goodwcs.fixedepoch',
+                                  imgdir = '../',
+                                  outputdir = '../Results/',
+                                  imgexten = '.png',
+                                  rescale = 2.2):
+
+    region1 = [11.05, 41.32, 0.47, 0.45]   # brick 5 + SF ring
+    region2 = [11.29, 41.8,  0.55, 0.5]    # brick 9 + brick 15 region
+    region3 = [11.585, 42.1, 0.55, 0.5]
+    nregions = 3
+    regions = [region1, region2, region3]
+
+    # set figsize to match plot_final, but then adjust for colorbar
+    widthadjust = 0.3
+    figsize = (10.5 - widthadjust,10.5)
+
+    # assumes have already run:
+    # extract_layers_from_rgb_fits(imgroot)
+
+    fileroot = imgdir + imgroot
+
+    fitsfilename = fileroot + '.fits'
+    print 'Displaying ', fitsfilename
+    gc = aplpy.FITSFigure(fitsfilename,north='True', 
+                          figsize=figsize)    
+    gc.show_colorscale(cmap='RdBu_r', vmin=0, vmax=6500,
+                       interpolation='nearest', aspect='auto')
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+    
+    print 'Generating sub-region images...'
+    for i in range(nregions):
+
+        r = regions[i]
+        gc.recenter(r[0], r[1], width=r[2], height=r[3])
+        filename = outputdir + imgroot + '.region' + str(i+1) + imgexten
+        print 'Saving ', filename
+        gc.save(filename, adjust_bbox='True')
+
+    return
+
+def extract_layers_from_rgb_fits(fileroot):
+
+    img = fileroot + '.fits'
+
+    hdulist = fits.open(img)
+    hdulist.info()
+
+    hdr = hdulist[0].header
+    hdr['NAXIS'] = 2
+    hdr.remove('NAXIS3')
+
+    data = hdulist[0].data
+    print data.shape
+    
+    data1 = data[0,:,:]
+    data2 = data[1,:,:]
+    data3 = data[2,:,:]
+
+    img1 = fileroot + '.R.fits'
+    img2 = fileroot + '.G.fits'
+    img3 = fileroot + '.B.fits'
+
+    fits.writeto(img1, data1, hdr)
+    fits.writeto(img2, data2, hdr)
+    fits.writeto(img3, data3, hdr)
+
+    hdulist.close()
+
+    return
+
+def convert_draine_to_AV():
+
+    # make a version of the drain dust mass map in terms of A_V, based on DL07 models
+    #
+    # Bruce's email as of May 29, 2013:  A_V = 0.74*Sigma_Md/(10^5 Msol/kpc^2)
+    
+    fileroot = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust'
+    img = fileroot + '.fits'
+
+    hdulist = fits.open(img)
+    hdulist.info()
+
+    hdr = hdulist[0].header
+
+    data = hdulist[0].data
+    print data.shape
+
+    data1 = data * 0.74 / 1.e5
+    
+    img1 = fileroot + '.AV.fits'
+
+    fits.writeto(img1, data1, hdr)
+
+    hdulist.close()
+
+    return
+
+def fix_epoch_in_gas_header_and_flatten():
+
+    # make a version of the drain dust mass map in terms of A_V, based on DL07 models
+    #
+    # Bruce's email as of May 29, 2013:  A_V = 0.74*Sigma_Md/(10^5 Msol/kpc^2)
+    
+    fileroot = '../m31_HI_goodwcs'
+    img = fileroot + '.fits'
+
+    hdulist = fits.open(img)
+    hdulist.info()
+
+    hdr = hdulist[0].header
+    hdr['EPOCH'] = 1950.0
+    hdr['NAXIS'] = 2
+    hdr.remove('NAXIS3')
+    hdr.remove('NAXIS4')
+    hdr.remove('CTYPE3')
+    hdr.remove('CRVAL3')
+    hdr.remove('CDELT3')
+    hdr.remove('CRPIX3')
+    hdr.remove('CROTA3')
+    hdr.remove('CTYPE4')
+    hdr.remove('CRVAL4')
+    hdr.remove('CDELT4')
+    hdr.remove('CRPIX4')
+    hdr.remove('CROTA4')
+
+    data = hdulist[0].data
+    print data.shape
+
+    img1 = fileroot + '.fixedepoch.fits'
+
+    fits.writeto(img1, data[0,0,:,:], hdr)
+
+    hdulist.close()
+
+    return
+
+
+    
