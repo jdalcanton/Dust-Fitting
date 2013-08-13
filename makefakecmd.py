@@ -937,20 +937,23 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
 
     # set up grid sizes, magnitude limits, etc
     crange    = [0.3,3.5]        # range of colors to use in CMD fitting
-    maglimoff = [0.0, 0.25]      # shift 50% magnitude limits this much brighter
+    #maglimoff = [0.0, 0.25]      # shift 50% magnitude limits this much brighter
+    maglimoff = [0.0, 0.5]      # shift 50% magnitude limits this much brighter
     #deltapixorig = [0.025,0.2]  # pixel_size in CMD color, magnitude
     mfitrange = [18.7,21.3]      # range for doing selection for "narrow" RGB
     #d_arcsec = 6.64515           # resolution of ra-dec grid for result (6.64515 = 25 pc at 776 kpc)
     floorfrac_value = 0.05       # define fraction of uniform "noise" to include in data model
     dr = 0.025                   # radius interval within which to do analyses
     r_interval_range = [0.15, 1.8] # range over which to calculate foreground CMDs (clips bulge)
-    nrgbstars = 3000             # target number of stars on upper RGB
+    #nrgbstars = 3000             # target number of stars on upper RGB
+    nrgbstars = 2750             # target number of stars on upper RGB
     n_substeps = 6               # number of substeps before radial foreground CMDs are independent
     masksig = [2.5, 3.0]         # limits of data mask for clipping noise from foreground CMD
     noisemasksig = [4.5,3.5]     # limits of noise mask for clipping foreground CMD from noise
     n_fit_min = 15
-    frac_red_mean = 0.4
-    param_init = [-0.05, 0.35, 0.9]  # starting at x=0 locks in, because random*0 = 0
+    #frac_red_mean = 0.4
+    frac_red_mean = 0.2          # matters at low AV, where filling factor is small
+    param_init = [0.05, 0.35, 0.4]  # starting at x=0 locks in, because random*0 = 0
     prior_parameters = ln_priors(param_init, return_prior_parameters=True)
 
     # set up file names
@@ -1093,15 +1096,16 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                                for i in range(len(meanlgnstar_vec)-1)])
     # append real outer limit (note: was maximum for radius, but is minimum for lgn!)
     max_lgnstarrange = nanmax(lgnstarrange_array)
-    max_lgnstarrange = 10.0
+    max_lgnstarrange = 0.75
     max_bricklgn = nanmax(lgnstar_range_limit)
     max_lgnstar = maximum(max_lgnstarrange, max_bricklgn)
     min_lgnstarrange = nanmin(lgnstarrange_array)
     #min_lgnstarrange = -10.
     min_bricklgn = nanmin(lgnstar_range_limit)
     min_lgnstar = minimum(min_lgnstarrange, min_bricklgn)
-    print min_lgnstar, min_lgnstarrange, max_bricklgn
-    lgnstar_intervals = append([min_lgnstar], lgnstar_intervals, max_lgnstar)
+    print min_lgnstar, min_lgnstarrange, max_bricklgn, max_lgnstar
+    lgnstar_intervals = append([min_lgnstar], lgnstar_intervals)
+    lgnstar_intervals = append(lgnstar_intervals, [max_lgnstar])
     print 'Using global lgnstar_intervals: ', lgnstar_intervals
 
     # bin data into ra-dec
@@ -1474,7 +1478,7 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
     percentile_values = zeros([nx, ny, nz_sigma])
     quality_values = zeros([nx, ny, nz_quality])
 
-    param_init = [-0.05, 0.5, 0.4]  # starting at x=0 locks in, because random*0 = 0
+    param_init = [0.005, 0.5, 0.4]  # starting at x=0 locks in, because random*0 = 0
     #param_init = [0.5, 0.5, 0.2]   # use for f fitting
 
     if ra_bin_num == '':
@@ -1682,24 +1686,29 @@ def ln_priors(p, return_prior_parameters=False):
     
     # set up ranges
 
-    p0 = [-3.0, 3.0]           # x = ln(f/(1-f)) where fracred -- red fraction
+    p0 = [-0.75, 5.0]           # x = ln(f/(1-f)) where fracred -- red fraction
     p1 = [0.0001, 10.0]         # median A_V
     p2 = [0.01, 1.5]           # sigma
                               
     # set up gaussian for x
     p0mean = 0.0              # symmetric in x means mean of f=0.5
-    p0stddev = 1.0
-    p0alpha = 0.0             # for implementing skew normal prior....
+    p0stddev = 1.5
+
+    # set up lognormal for x
+    p0mode = -p0[0]             # symmetric in x means mean of f=0.5
+    p0offset = p0[0]
+    p0sigma = 2.0  
+    p0mu = np.log(p0mode) + p0sigma**2   # mu = ln(median)
 
     # set up log normal for sigma, keeping same mode
     p2mode = 0.4              # w = broad gaussian 
     p2sigma = 0.5
-    p2mu = np.log(p2mode) + p2sigma**2
+    p2mu = np.log(p2mode) + p2sigma**2   # mu = ln(median)
 
     if return_prior_parameters:
 
         return {'p0': p0, 'p1': p1, 'p2': p2, 
-                'p0mean': p0mean, 'p0stddev': p0stddev, 'p0alpha': p0alpha,
+                'p0mode': p0mode, 'p0sigma': p0sigma,   'p0mu': p0mu, 'p0offset': p0offset,
                 'p2mode': p2mode, 'p2sigma': p2sigma,   'p2mu': p2mu}
 
     else: 
@@ -1713,7 +1722,8 @@ def ln_priors(p, return_prior_parameters=False):
         # (for a Gaussian prior on x) and the ln of the log normal prior
         # on sigma (p[2])
         lnp = 0.0000001
-        lnp += -0.5 * (p[0] - p0mean) ** 2 / p0stddev**2
+        #lnp += -0.5 * (p[0] - p0mean) ** 2 / p0stddev**2
+        lnp += - np.log(p[0]-p0offset) - 0.5 * (np.log(p[0]-p0offset) - p0mu) ** 2 / p0sigma**2
         lnp += - np.log(p[2]) - 0.5 * (np.log(p[2]) - p2mu) ** 2 / p2sigma**2
 
         return lnp

@@ -1020,13 +1020,132 @@ def make_radius_image(fitsfilename, rabins, decbins):
 
     return r, ra, dec
 
-def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
-                              cleanstr = '_clean', imgexten='.png',
-                              write_fits = 'True'):
+def get_draine_at_lowAV(ratiofix = 2.3):
 
     drainefile = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.AV.fits'
-    draineresolution = 24.9
-    AVresolution = 6.645
+    unreddenedfile = '../Unreddened/FourthRun15arcsec/allbricks.clean.npz'
+    allunreddenedfile = '../Unreddened/FourthRun15arcsec/allbricks.npz'
+
+    # read Draine file data
+    print 'Opening Draine image...'
+    f = pyfits.open(drainefile)
+    hdr, draineimg = f[0].header, f[0].data
+
+    # get ra dec of draine image
+    wcs = pywcs.WCS(hdr)
+
+    # read low reddening regions
+    data = np.load(unreddenedfile)
+    ra = data['ragrid']
+    dec = data['decgrid']
+    nstar = data['nstargrid']
+    radius = data['rgrid']
+    cmean = data['cmgrid']
+    cstd = data['cstdgrid']
+
+    # read low reddening regions
+    dataall = np.load(allunreddenedfile)
+    raall = dataall['ragridval']
+    decall = dataall['decgridval']
+    nstarall = dataall['nstargridval']
+    radiusall = dataall['rgridval']
+    cstdall = dataall['cstdgridval']
+    cmeanall = dataall['cmeangridval']
+
+    # get Draine pixel locations
+    img_coords = wcs.wcs_sky2pix(ra, dec, 1)
+    img_coords_all = wcs.wcs_sky2pix(raall, decall, 1)
+
+    # grab values at those locations
+    loAV = draineimg[np.rint(img_coords[0]).astype('int'),np.rint(img_coords[1]).astype('int')]
+    loAVall = draineimg[np.rint(img_coords_all[0]).astype('int'),np.rint(img_coords_all[1]).astype('int')]
+    
+    # plot results
+
+    plt.figure(1)
+    plt.clf()
+    plt.plot(np.log10(nstar), loAV, ',', color='blue')
+    plt.xlabel(r'$\log_{10}N_{star}$')
+    plt.ylabel('$A_{V,emission}$')
+
+    plt.figure(2)
+    plt.clf()
+    plt.plot(radius, loAV, ',', color='blue')
+    plt.xlabel('Radius (Degrees)')
+    plt.ylabel('$A_{V,emission}$')
+
+    plt.figure(3)
+    plt.clf()
+    plt.plot(np.log10(nstar), loAV / ratiofix, ',', color='blue')
+    plt.xlabel(r'$\log_{10}N_{star}$')
+    plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
+
+    plt.figure(4)
+    plt.clf()
+    plt.plot(radius, loAV / ratiofix, ',', color='blue')
+    plt.xlabel('Radius (Degrees)')
+    plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
+
+    plt.figure(5)
+    plt.clf()
+    plt.plot(radiusall, loAVall / ratiofix, ',', color='blue')
+    plt.xlabel('Radius (Degrees)')
+    plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
+
+    plt.figure(6)
+    plt.clf()
+    im = plt.scatter(radiusall, loAVall / ratiofix, c=cstdall, s=7, linewidth=0, alpha=0.4, vmin=0.02, vmax=0.15)
+    plt.colorbar(im)
+    plt.xlabel('Radius (Degrees)')
+    plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
+    plt.suptitle('RGB Width')
+
+    plt.figure(7)
+    plt.clf()
+    im = plt.scatter(np.log10(nstarall), loAVall / ratiofix, c=cstdall, s=7, linewidth=0, alpha=0.4, vmin=0.02, vmax=0.15)
+    plt.colorbar(im)
+    plt.xlabel(r'$\log_{10}N_{star}$')
+    plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
+    plt.suptitle('RGB Width')
+
+    plt.figure(8)
+    plt.clf()
+    im = plt.scatter(radiusall, loAVall / ratiofix, c=cmeanall, s=7, linewidth=0, alpha=0.4, vmin=-0.1, vmax=0.01)
+    plt.colorbar(im)
+    plt.xlabel('Radius (Degrees)')
+    plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
+    plt.suptitle('Mean RGB color')
+
+    plt.figure(9)
+    plt.clf()
+    im = plt.scatter(np.log10(nstarall), loAVall / ratiofix, c=cmeanall, s=7, linewidth=0, alpha=0.4, vmin=-0.1, vmax=0.01)
+    plt.colorbar(im)
+    plt.xlabel(r'$\log_{10}N_{star}$')
+    plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
+    plt.suptitle('Mean RGB color')
+
+    plt.figure(10)
+    plt.clf()
+    im = plt.scatter(radius, loAV / ratiofix, c=cmean, s=7, linewidth=0, alpha=1.0, vmin=-0.1, vmax=0.01)
+    plt.colorbar(im)
+    plt.xlabel('Radius (Degrees)')
+    plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
+    plt.suptitle('Mean RGB color')
+
+    plt.figure(11)
+    plt.clf()
+    im = plt.scatter(np.log10(nstar), loAV / ratiofix, c=cmean, s=7, linewidth=0, alpha=1.0, vmin=-0.1, vmax=0.01)
+    plt.colorbar(im)
+    plt.xlabel(r'$\log_{10}N_{star}$')
+    plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
+    plt.suptitle('Mean RGB color')
+
+def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
+                             cleanstr = '_clean', imgexten='.png'):
+
+    drainefile = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.AV.fits'
+    draineresolution = 24.9   # FWHM
+    AVresolution = 6.645      # FWHM
     output_smooth_AV_root = resultsdir + fileroot + '_interleaved_draine_smoothed.AV'
     output_smooth_meanAV_root = resultsdir + fileroot + '_interleaved_draine_smoothed.meanAV'
     output_smooth_AV_file = output_smooth_AV_root + '.fits'
@@ -1039,7 +1158,8 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
                                            arrayname=arrayname, 
                                            arraynum=arraynum)
     AV = a
-    print 'Size of extinciton map: ', AV.shape
+
+    print 'Size of extinction map: ', AV.shape
 
     # mean extinction
     if (fileroot == 'merged'):
@@ -1052,33 +1172,22 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
                                            arraynum=arraynum)
     meanAV = a
 
+    # mask indicating no data regions for original input
+
+    maskorig = np.where(AV > 0, 1.0, 0.0)
+
     # run the smoothing algorithm on both A_V maps
 
-    if (write_fits == 'True'):
-
-        wcs, im_coords, draineimg, AV_img = compare_img_to_AV(AV, ra_bins, dec_bins, drainefile, 
-                                                              crop='True',
-                                                              scaleimgfactor = 1.0,
-                                                              resolution_in_arcsec=draineresolution, 
-                                                              AV_resolution_in_arcsec=AVresolution, 
-                                                              outputAVfile=output_smooth_AV_file)
-        wcs, im_coords, draineimg, meanAV_img = compare_img_to_AV(meanAV, ra_bins, dec_bins, drainefile, 
-                                                                  crop='True',
-                                                                  scaleimgfactor = 1.0,
-                                                                  resolution_in_arcsec=draineresolution, 
-                                                                  AV_resolution_in_arcsec=AVresolution, 
-                                                                  outputAVfile=output_smooth_meanAV_file)
-    else:
-
-        # read from existing files
-        f = pyfits.open(drainefile)
-        draineimg = f[0].data
-        f = pyfits.open(drainefile)
-        hdr, draineimg = f[0].header, f[0].data
-        f = pyfits.open(output_smooth_AV_file)
-        AV_img = f[0].data
-        f = pyfits.open(output_smooth_meanAV_file)
-        meanAV_img = f[0].data
+    # read from existing files
+    print 'Opening existing smoothed images ', output_smooth_AV_file,' and ',output_smooth_meanAV_file
+    f = pyfits.open(drainefile)
+    draineimg = f[0].data
+    f = pyfits.open(drainefile)
+    hdr, draineimg = f[0].header, f[0].data
+    f = pyfits.open(output_smooth_AV_file)
+    AV_img = f[0].data
+    f = pyfits.open(output_smooth_meanAV_file)
+    meanAV_img = f[0].data
 
     # get ra dec of draine image
     f = pyfits.open(drainefile)
@@ -1098,44 +1207,144 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
     # initialize machinery for solving for bias
 
     mask = np.where(AV_img > 0, 1.0, 0.0)
-    hiAVmask = np.where(AV_img > 0.25, 1.0, 0.0)
-    loAVmask = np.where((0 < AV_img) & (AV_img <= 0.25), 1.0, 0.0)
-    i_good = np.where(mask > 0)
-    i_hiAV = np.where(hiAVmask > 0)
-    i_loAV = np.where(loAVmask > 0)
+    i_unmasked = np.where(mask > 0)
+    i_masked = np.where(mask == 0)
+
     AVratio = draineimg / AV_img 
     meanAVratio = draineimg / meanAV_img
+    # mask out no data  regions (robust to divide by zero)
+    AVratio[i_masked] = 0.0
+    meanAVratio[i_masked] = 0.0
 
-    # Loop through possible bias corrections
-    nbias = 51.
+    # set minimum AV to use in the fit
+
+    AVlim = 0.5
+
+    i_good = np.where(AV_img > AVlim)
+
+    # Estimate uncertainty in ratio at each A_V
+
+    print 'Calculating uncertainties...'
+    AVbins = np.linspace(0.25, 4.0, 31)
+    i_AVbins = np.digitize(AV_img[i_good], AVbins) - 1
+    AVindexvec = np.empty(len(AVbins), dtype=object)
+    print 'Len(AVindexvec): ', len(AVindexvec)
+    for i in range(len(AVbins)):
+        AVindexvec[i] = []
+    for i in range(len(i_good[0])):
+        AVindexvec[i_AVbins[i]].append(i)
+
+    # Calculate dispersion in each bin
+    AVdispersionbinned = np.zeros(len(AVbins)-1)
+    meanAVdispersionbinned = np.zeros(len(AVbins)-1)
+    for i in range(len(AVdispersionbinned)):
+        if len(AVindexvec[i]) > 1:
+            AVdispersionbinned[i] = np.std(AVratio[i_good[0][AVindexvec[i]],
+                                                   i_good[1][AVindexvec[i]]])
+            meanAVdispersionbinned[i] = np.std(meanAVratio[i_good[0][AVindexvec[i]],
+                                                           i_good[1][AVindexvec[i]]])
+
+    # fit a polynomial to the dispersion vector
+    npoly = 5
+    AVbincen = (AVbins[:-1] + AVbins[1:]) / 2.0
+    i_ok = np.where(AVdispersionbinned > 0)
+    AV_dispersion_param = np.polyfit(AVbincen[i_ok], 
+                                     AVdispersionbinned[i_ok], npoly)
+    meanAV_dispersion_param = np.polyfit(AVbincen[i_ok], 
+                                         meanAVdispersionbinned[i_ok], npoly)
+    p_AVratio_dispersion = np.poly1d(AV_dispersion_param)
+    p_meanAVratio_dispersion = np.poly1d(meanAV_dispersion_param)
+
+    # Populate dispersion vector
+    AVratiodispersion = np.zeros(AVratio.shape)
+    meanAVratiodispersion = np.zeros(AVratio.shape)
+    AVratiodispersion[i_good] = p_AVratio_dispersion(AV_img[i_good])
+    meanAVratiodispersion[i_good] = p_meanAVratio_dispersion(AV_img[i_good])
+
+    plt.figure(1)
+    plt.clf()
+    plt.plot(AV_img[i_good], AVratiodispersion[i_good], ',', color='blue') 
+    plt.plot(AVbincen, AVdispersionbinned, '*', color='red') 
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$\widetilde{A_V}$ Ratio')
+    
+    plt.figure(2)
+    plt.clf()
+    plt.plot(AV_img[i_good], meanAVratiodispersion[i_good], ',', color='blue') 
+    plt.plot(AVbincen, meanAVdispersionbinned, '*', color='red') 
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel(r'$\langle A_V \rangle$ Ratio')
+    
+    # Generate grid of possible bias, ratio corrections, first for medain AV, then mean
+
+    nbias = 101.
     nR = 76.
-    biasrange = [0, 1]
+    biasrange = [-0.25, 1.25]
     Rrange = [0.5, 3.0]
     biasvec = np.linspace(biasrange[0], biasrange[1], nbias)
     Rvec = np.linspace(Rrange[0], Rrange[1], nR)
-    chi2vec = np.zeros((nbias, nR))
-    AVlim = 0.625
 
-    i_good = np.where(AV_img > AVlim)
-        
+    #  lgnstar vec [-1.07342892 -0.85899891 -0.77736519 -0.69294421 -0.60640575 -0.5248202
+    #   -0.45251709 -0.38013821 -0.28686579 -0.18048609]
+
+    # First median AV....
+
+    chi2vec = np.zeros((nbias, nR))
     for i, R in enumerate(Rvec):
 
         for j, bias in enumerate(biasvec):
 
-            diff = AVratio[i_good] - R*(1. + bias/meanAV_img[i_good])
-            chi2 = diff**2
+            diff = AVratio[i_good] - R*(1. + bias/AV_img[i_good])
+            chi2 = (diff / AVratiodispersion[i_good])**2
 
             chi2vec[j, i] = np.sum(chi2) / len(chi2)
 
     minchi2 = np.min(chi2vec)
     i_minchi2 = np.where(chi2vec == minchi2)   # there's a way to do this with np.argmin...
     minRglobal, minbiasglobal = Rvec[i_minchi2[1][0]], biasvec[i_minchi2[0][0]]
+
+    print 'Best Fit for whole distribution using median AV: ',minRglobal, minbiasglobal
     
-    print 'Best Fit for whole distribution: ',minRglobal, minbiasglobal
-    
-    plt.figure(1)
+    print 'Plotting Global Chi2'
+
+    dchi_max = 1.0
+
+    plt.figure(30)
     plt.clf()
-    im = plt.imshow(chi2vec, vmax=4.,
+    im = plt.imshow(chi2vec,  vmax=np.min(chi2vec) + dchi_max,
+                    extent=[Rrange[0], Rrange[1], biasrange[0], biasrange[1]], aspect='auto', origin='lower',
+                    cmap='gist_ncar', interpolation='nearest')
+    plt.colorbar(im)
+    plt.plot(minRglobal, minbiasglobal, '*', markersize=20, color='white')
+    plt.xlabel('$A_V$ Ratio (Emission / Extinction)')
+    plt.ylabel(r'$\widetilde{A_V}$ Bias')
+    plt.suptitle('Fitting $\widetilde{A_V} > %5.3f$' % AVlim)
+    
+    # ...then mean AV....
+
+    chi2vec = np.zeros((nbias, nR))
+    for i, R in enumerate(Rvec):
+
+        for j, bias in enumerate(biasvec):
+
+            diff = meanAVratio[i_good] - R*(1. + bias/meanAV_img[i_good])
+            chi2 = (diff / meanAVratiodispersion[i_good])**2
+
+            chi2vec[j, i] = np.sum(chi2) / len(chi2)
+
+    minchi2 = np.min(chi2vec)
+    i_minchi2 = np.where(chi2vec == minchi2)   # there's a way to do this with np.argmin...
+    minRglobal, minbiasglobal = Rvec[i_minchi2[1][0]], biasvec[i_minchi2[0][0]]
+
+    print 'Best Fit for whole distribution using mean AV: ',minRglobal, minbiasglobal
+    
+    print 'Plotting Global Chi2'
+
+    dchi_max = 1.0
+
+    plt.figure(3)
+    plt.clf()
+    im = plt.imshow(chi2vec,  vmax=np.min(chi2vec) + dchi_max,
                     extent=[Rrange[0], Rrange[1], biasrange[0], biasrange[1]], aspect='auto', origin='lower',
                     cmap='gist_ncar', interpolation='nearest')
     plt.colorbar(im)
@@ -1150,8 +1359,8 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
     nsubplot = 4
     nlgnstarbins = 25.
     nsubplot = 5
-    nlgnstarbins = 36.
-    nsubplot = 6
+    #nlgnstarbins = 36.
+    #nsubplot = 6
     lgnstar = np.log10(iAV.get_nstar_at_ra_dec(ra, dec, renormalize_to_surfdens=True))
     minlgnstar = min(lgnstar[i_good])
     maxlgnstar = 0   # artificial, but inner parts are crap
@@ -1168,33 +1377,45 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
                           (AV_img > AVlim))
 
         chi2tmp = np.zeros((nbias, nR))
-        for i, R in enumerate(Rvec):
+
+        if (len(i_keep) > 0):
+
+            for i, R in enumerate(Rvec):
             
-            for j, bias in enumerate(biasvec):
+                for j, bias in enumerate(biasvec):
                 
-                diff = AVratio[i_keep] - R*(1. + bias/meanAV_img[i_keep])
-                chi2 = diff**2
+                    diff = meanAVratio[i_keep] - R*(1. + bias/meanAV_img[i_keep])
+                    chi2 = (diff / meanAVratiodispersion[i_keep])**2
                 
-                chi2tmp[j, i] = np.sum(chi2) / len(chi2)
-                chi2array[j, i, k] = np.sum(chi2) / len(chi2)
-                
-        minchi2 = np.min(chi2tmp)
-        i_minchi2 = np.where(chi2tmp == minchi2)   # there's a way to do this with np.argmin...
-        minR, minbias = Rvec[i_minchi2[1][0]], biasvec[i_minchi2[0][0]]
-        minRvec[k] = minR
-        minbiasvec[k] = minbias
-        print 'Best Fit for lgn ',lgnstarval,' is ',minR, minbias
+                    chi2tmp[j, i] = np.sum(chi2) / len(chi2)
+                    chi2array[j, i, k] = np.sum(chi2) / len(chi2)
+                    
+            minchi2 = np.min(chi2tmp)
+            i_minchi2 = np.where(chi2tmp == minchi2)   # there's a way to do this with np.argmin...
+            minR, minbias = Rvec[i_minchi2[1][0]], biasvec[i_minchi2[0][0]]
+            minRvec[k] = minR
+            minbiasvec[k] = minbias
+            print 'Best Fit for lgn ',lgnstarval,' is ',minR, minbias
+
+        else:
+
+            minRvec[k] = 0
+            minbiasvec[k] = 0
+            print 'No data in fitting range for lgn ',lgnstarval,' is ',minR, minbias
+
         
     # plot ratio, bias chi2 distributions as a function of lgnstar
 
-    plt.figure(20)
+    print 'Plotting Figure 4'
+    plt.figure(4)
     plt.close()
-    plt.figure(20, figsize=(13,10))
+    plt.figure(4, figsize=(13,10))
 
     for i, lgnstarval in enumerate(lgnstarvec):
 
         plt.subplot(nsubplot, nsubplot, i + 1)
-        im = plt.imshow(chi2array[:,:,i], vmax=4.,
+        im = plt.imshow(chi2array[:,:,i], 
+                        vmax=np.min(chi2array[:,:,i]) + dchi_max,
                         extent=[Rrange[0], Rrange[1], biasrange[0], biasrange[1]], 
                         aspect='auto', origin='lower',
                         cmap='gist_ncar', interpolation='nearest')
@@ -1209,9 +1430,10 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
  
    # plot ratio, bias solutions distributions as a function of lgnstar
 
-    plt.figure(21)
+    print 'Plotting Figure 5'
+    plt.figure(5)
     plt.close()
-    plt.figure(21, figsize=(13,10))
+    plt.figure(5, figsize=(13,10))
 
     AVvec = np.linspace(0,5,50)
     greyval = '#B3B3B3'
@@ -1243,21 +1465,139 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
                      xycoords = 'axes fraction')
 
 
-    plt.figure(14)
+    print 'Plotting Figure 6'
+    plt.figure(6)
     plt.close()
-    plt.figure(14, figsize=(10,10))
+    plt.figure(6, figsize=(10,10))
     plt.plot(lgnstarvec, minbiasvec)
     plt.xlabel(r'$\log_{10} N_{star}$')
     plt.ylabel('Bias')
 
-    plt.figure(15)
+    print 'Plotting Figure 7'
+    plt.figure(7)
     plt.close()
-    plt.figure(15, figsize=(10,10))
+    plt.figure(7, figsize=(10,10))
     plt.plot(lgnstarvec, minRvec)
     plt.xlabel(r'$\log_{10} N_{star}$')
     plt.ylabel('Ratio')
 
-    return
+    # adjust images by the global solutions
+
+    AV_fix = maskorig * (AV + minbiasglobal)
+    meanAV_fix = maskorig * (meanAV + minbiasglobal)
+    AV_img_fix = mask * (AV_img + minbiasglobal)
+    meanAV_img_fix = mask * (meanAV_img + minbiasglobal)
+    draineimg_fix = mask * (draineimg / minRglobal)
+    meanAVratio_fix = mask * (draineimg_fix / meanAV_img_fix)
+
+    # regenerate smoothed image with debiased input AV maps, for a few different 
+    # smoothing parameters to test if residuals go down.
+
+    test_resolution = 'False'
+    if (test_resolution == 'True'):
+
+        wcs, im_coords, draineimg2, meanAV_img_08 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
+                                                                      crop='True',
+                                                                      scaleimgfactor = 1.0,
+                                                                      resolution_in_arcsec=draineresolution*0.8, 
+                                                                      AV_resolution_in_arcsec=AVresolution, 
+                                                                      outputAVfile='')
+        wcs, im_coords, draineimg2, meanAV_img_09 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
+                                                                      crop='True',
+                                                                      scaleimgfactor = 1.0,
+                                                                      resolution_in_arcsec=draineresolution*0.9, 
+                                                                      AV_resolution_in_arcsec=AVresolution, 
+                                                                      outputAVfile='')
+        wcs, im_coords, draineimg2, meanAV_img_11 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
+                                                                      crop='True',
+                                                                      scaleimgfactor = 1.0,
+                                                                      resolution_in_arcsec=draineresolution*1.1, 
+                                                                      AV_resolution_in_arcsec=AVresolution, 
+                                                                      outputAVfile='')
+        wcs, im_coords, draineimg2, meanAV_img_12 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
+                                                                      crop='True',
+                                                                      scaleimgfactor = 1.0,
+                                                                      resolution_in_arcsec=draineresolution*1.2, 
+                                                                      AV_resolution_in_arcsec=AVresolution, 
+                                                                      outputAVfile='')
+        wcs, im_coords, draineimg2, meanAV_img_13 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
+                                                                      crop='True',
+                                                                      scaleimgfactor = 1.0,
+                                                                      resolution_in_arcsec=draineresolution*1.3, 
+                                                                      AV_resolution_in_arcsec=AVresolution, 
+                                                                      outputAVfile='')
+        wcs, im_coords, draineimg2, meanAV_img_14 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
+                                                                      crop='True',
+                                                                      scaleimgfactor = 1.0,
+                                                                      resolution_in_arcsec=draineresolution*1.4, 
+                                                                      AV_resolution_in_arcsec=AVresolution, 
+                                                                      outputAVfile='')
+        wcs, im_coords, draineimg2, meanAV_img_15 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
+                                                                      crop='True',
+                                                                      scaleimgfactor = 1.0,
+                                                                      resolution_in_arcsec=draineresolution*1.5, 
+                                                                      AV_resolution_in_arcsec=AVresolution, 
+                                                                      outputAVfile='')
+        i_unmasked_orig = i_unmasked
+        mask = np.where(meanAV_img_12 > 0.25, 1.0, 0.0)  # set highish threshold to avoid bias offset
+        i_unmasked = np.where(mask > 0)
+        i_masked = np.where(mask == 0)
+        rat_08 = mask * draineimg2 / meanAV_img_08
+        rat_09 = mask * draineimg2 / meanAV_img_09
+        #rat_10 = np.where(meanAV_img > 0.25, 1.0, 0.0) * draineimg / meanAV_img_fix
+        rat_11 = mask * draineimg2 / meanAV_img_11
+        rat_12 = mask * draineimg2 / meanAV_img_12
+        rat_13 = mask * draineimg2 / meanAV_img_13
+        rat_14 = mask * draineimg2 / meanAV_img_14
+        rat_15 = mask * draineimg2 / meanAV_img_15
+        
+        print ' Smooth Fac     Mean    Median    Stddev  '
+        print '0.8', np.mean(rat_08[i_unmasked]), np.median(rat_08[i_unmasked]), np.std(rat_08[i_unmasked])
+        print '0.9', np.mean(rat_09[i_unmasked]), np.median(rat_09[i_unmasked]), np.std(rat_09[i_unmasked])
+        #print '1.0', np.mean(rat_10[i_unmasked_orig]), np.median(rat_10[i_unmasked_orig]), np.std(rat_10[i_unmasked_orig])
+        print '1.1', np.mean(rat_11[i_unmasked]), np.median(rat_11[i_unmasked]), np.std(rat_11[i_unmasked])
+        print '1.2', np.mean(rat_12[i_unmasked]), np.median(rat_12[i_unmasked]), np.std(rat_12[i_unmasked])
+        print '1.3', np.mean(rat_13[i_unmasked]), np.median(rat_13[i_unmasked]), np.std(rat_13[i_unmasked])
+        print '1.4', np.mean(rat_14[i_unmasked]), np.median(rat_14[i_unmasked]), np.std(rat_14[i_unmasked])
+        print '1.5', np.mean(rat_15[i_unmasked]), np.median(rat_15[i_unmasked]), np.std(rat_15[i_unmasked])
+        
+        plt.figure(8)
+        plt.clf
+        plt.imshow(rat_08 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
+        
+        plt.figure(8)
+        plt.clf
+        plt.imshow(rat_08 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
+        
+        plt.figure(9)
+        plt.clf
+        plt.imshow(rat_09 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
+        
+        plt.figure(10)
+        plt.clf
+        #plt.imshow(rat_10 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
+        
+        plt.figure(11)
+        plt.clf
+        plt.imshow(rat_11 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
+        
+        plt.figure(12)
+        plt.clf
+        plt.imshow(rat_12 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
+        
+        plt.figure(13)
+        plt.clf
+        plt.imshow(rat_13 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
+        
+        plt.figure(14)
+        plt.clf
+        plt.imshow(rat_15 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
+        
+        plt.figure(16)
+        plt.clf
+        plt.imshow(rat_16 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
+
+    return meanAV_img, draineimg, meanAVratio, meanAV_img_fix, draineimg_fix, meanAVratio_fix
 
     # Scatter plot of ratio, color coded by lg10 Nstar
 
@@ -1306,13 +1646,130 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
 
     return
 
+def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
+                              cleanstr = '_clean', imgexten='.png',
+                              write_fits = 'False', write_ratio_fits = 'True',
+                              biasfix = 0.26, ratiofix=2.37,
+                              biasfixmean = 0.275, ratiofixmean=2.20,
+                              smooth_img=0):
 
-            
+    drainefile = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.AV.fits'
+    draineresolution = 24.9   # FWHM
+    AVresolution = 6.645      # FWHM
+    output_smooth_AV_root = resultsdir + fileroot + '_interleaved_draine_smoothed.AV'
+    output_smooth_meanAV_root = resultsdir + fileroot + '_interleaved_draine_smoothed.meanAV'
+    output_smooth_AV_file = output_smooth_AV_root + '.fits'
+    output_smooth_meanAV_file = output_smooth_meanAV_root + '.fits'
+    output_smooth_AV_ratio_file = output_smooth_AV_root + '.ratio.fits'
+    output_smooth_meanAV_ratio_file = output_smooth_meanAV_root + '.ratio.fits'
+    output_smooth_AV_ratiocorr_file = output_smooth_AV_root + '.ratiocorr.fits'
+    output_smooth_meanAV_ratiocorr_file = output_smooth_meanAV_root + '.ratiocorr.fits'
         
-        
-        
-        
-    
+    # median extinction
+    arrayname = 'bestfit_values' + cleanstr
+    arraynum = 1
+    a, ra_bins, dec_bins = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                                           arrayname=arrayname, 
+                                           arraynum=arraynum)
+    AV = a
+    print 'Size of extinction map: ', AV.shape
+
+    # mean extinction
+    if (fileroot == 'merged'):
+        arrayname = 'dervied_values' + cleanstr  #  note mispelling!
+    else:
+        arrayname = 'derived_values' + cleanstr
+    arraynum = 0
+    a, ra_bins, dec_bins = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                                           arrayname=arrayname, 
+                                           arraynum=arraynum)
+    meanAV = a
+
+    # run the smoothing algorithm on both A_V maps
+
+    if (write_fits == 'True'):
+
+        wcs, im_coords, draineimg, AV_img = compare_img_to_AV(AV, ra_bins, dec_bins, drainefile, 
+                                                              crop='True',
+                                                              scaleimgfactor = 1.0,
+                                                              resolution_in_arcsec=draineresolution, 
+                                                              AV_resolution_in_arcsec=AVresolution, 
+                                                              outputAVfile=output_smooth_AV_file)
+        wcs, im_coords, draineimg, meanAV_img = compare_img_to_AV(meanAV, ra_bins, dec_bins, drainefile, 
+                                                                  crop='True',
+                                                                  scaleimgfactor = 1.0,
+                                                                  resolution_in_arcsec=draineresolution, 
+                                                                  AV_resolution_in_arcsec=AVresolution, 
+                                                                  outputAVfile=output_smooth_meanAV_file)
+
+    # read from fits files (guarantees consistency -- compare_img_to_AV returns cropped version, but FITS=full)
+    f = pyfits.open(drainefile)
+    draineimg = f[0].data
+    hdr = f[0].header
+    wcs = pywcs.WCS(hdr)
+    f = pyfits.open(drainefile)
+    hdr, draineimg = f[0].header, f[0].data
+    f = pyfits.open(output_smooth_AV_file)
+    AV_img = f[0].data
+    f = pyfits.open(output_smooth_meanAV_file)
+    meanAV_img = f[0].data
+
+    # smooth images to reduce noise, if requested
+    if (smooth_img > 0):
+
+        print 'Boxcar smoothing images to reduce noise, using width ', int(smooth_img)
+        draineimg = scipy.stsci.convolve.boxcar(draineimg, (int(smooth_img), int(smooth_img)))
+        AV_img = scipy.stsci.convolve.boxcar(AV_img, (int(smooth_img), int(smooth_img)))
+        meanAV_img = scipy.stsci.convolve.boxcar(meanAV_img, (int(smooth_img), int(smooth_img)))
+
+    # get ra dec of draine image
+
+    i_dec, i_ra = np.meshgrid(np.arange(draineimg.shape[1]), np.arange(draineimg.shape[0]))
+    i_coords = np.array([[i_dec[i,j],i_ra[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
+    print 'draineimg.shape: ', draineimg.shape
+    print 'i_dec.shape: ', i_dec.shape
+    print 'i_coords.shape: ', i_coords.shape
+    # solve for RA, dec at those coords
+    img_coords = wcs.wcs_pix2sky(i_coords, 1)
+    img_coords = np.reshape(img_coords,(i_ra.shape[0],i_ra.shape[1],2))
+    ra  = img_coords[:,:,0]
+    dec = img_coords[:,:,1]
+
+    lgnstar = np.log10(iAV.get_nstar_at_ra_dec(ra, dec, renormalize_to_surfdens=True))
+
+    # select regions for analysis
+
+    mask = np.where(AV_img > 0, 1.0, 0.0)
+    i_masked = np.where(mask == 0)
+    i_unmasked = np.where(mask > 0)
+    mask_loAV = np.where(AV_img > 0.25, 1.0, 0.0)
+    i_loAV = np.where((mask_loAV == 0) & (mask > 0))
+    i_hiAV = np.where(mask_loAV > 0)
+
+    AVratio = draineimg / AV_img 
+    meanAVratio = draineimg / meanAV_img
+    AVratiocorr = (draineimg / ratiofix) / (AV_img + biasfix)
+    meanAVratiocorr = (draineimg / ratiofixmean) / (meanAV_img + biasfixmean)
+    # clean up masked regions -- do replacement to deal with NaN's in divisions.
+    AVratio[i_masked] = 0.0
+    meanAVratio[i_masked] = 0.0
+    AVratiocorr[i_masked] = 0.0
+    meanAVratiocorr[i_masked] = 0.0
+
+    # write ratio fits files
+
+    if (write_ratio_fits == 'True'):
+        print ' Writing ratio maps'
+        pyfits.writeto(output_smooth_AV_ratio_file, AVratio, header=hdr)
+        pyfits.writeto(output_smooth_meanAV_ratio_file, meanAVratio, header=hdr)
+        pyfits.writeto(output_smooth_AV_ratiocorr_file, AVratiocorr, header=hdr)
+        pyfits.writeto(output_smooth_meanAV_ratiocorr_file, meanAVratiocorr, header=hdr)
+
+    # set minimum AV to use in plots
+
+    AVlim = 0.325
+
+    i_good = np.where(AV_img > AVlim)
 
     ################################################
     # Make plots
@@ -1320,13 +1777,16 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
     # set image region
 
     region1 = [11.05, 41.32, 0.47, 0.45]   # brick 5 + SF ring
+    region2 = [11.29, 41.8,  0.55, 0.5]    # brick 9 + brick 15 region
+    region3 = [11.585, 42.1, 0.55, 0.5]
+    allregion = [11.33, 41.72, 0.92, 1.28]   # brick 5 + SF ring
 
     # Redefine fits files, in case write_fits='False'
 
     output_smooth_AV_file = output_smooth_AV_root + '.fits'
     output_smooth_meanAV_file = output_smooth_meanAV_root + '.fits'
 
-    # image of AV ratio
+    # image of smoothed AV
 
     gc = aplpy.FITSFigure(output_smooth_AV_file, convention='wells', 
                           figsize=(10.5,10.5),
@@ -1352,7 +1812,7 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
     print 'Saving ', filename
     gc.save(filename, adjust_bbox='True')
 
-    # image of meanAV ratio
+    # image of meanAV smoothed
 
     gc = aplpy.FITSFigure(output_smooth_meanAV_file, convention='wells', 
                           figsize=(10.5,10.5),
@@ -1378,6 +1838,232 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
     print 'Saving ', filename
     gc.save(filename, adjust_bbox='True')
 
+    # image of smoothed AV ratio
+
+    ratiomax = 10
+
+    gc = aplpy.FITSFigure(output_smooth_AV_ratio_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=ratiomax, cmap='spectral', 
+                       interpolation='nearest', aspect='auto')
+    # add AV level contours
+    gc.show_contour(output_smooth_AV_file, levels=[1.0], convention='wells',
+                    colors='black', linewidths=4)
+
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(r'$A_{V,emission} / \widetilde{A_V}$')
+
+    r = allregion
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region1'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region2
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region2'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region3
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region3'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # image of smoothed meanAV ratio
+
+    gc = aplpy.FITSFigure(output_smooth_meanAV_ratio_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=ratiomax, cmap='spectral', 
+                       interpolation='nearest', aspect='auto')
+    # add AV level contours
+    gc.show_contour(output_smooth_meanAV_file, levels=[1.0], convention='wells',
+                    colors='black', linewidths=4)
+
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(r'$A_{V,emission} / \langle A_V \rangle$')
+
+    r = allregion
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region1'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region2
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region2'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region3
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region3'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # image of smoothed AV corrected ratio
+
+    gc = aplpy.FITSFigure(output_smooth_AV_ratiocorr_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=2, cmap='seismic', 
+                       interpolation='nearest', aspect='auto')
+    # add AV level contours
+    gc.show_contour(output_smooth_AV_file, levels=[1.0], convention='wells',
+                    colors='black', linewidths=4)
+
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(r'$(A_{V,emission} / %4.2f) / (\widetilde{A_V} + %4.2f)$' % (ratiofix, biasfix))
+
+    r = allregion
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region1'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region2
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region2'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region3
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region3'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # image of smoothed meanAV ratio
+
+    gc = aplpy.FITSFigure(output_smooth_meanAV_ratiocorr_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=2, cmap='seismic', 
+                       interpolation='nearest', aspect='auto')
+    # add AV level contours
+    gc.show_contour(output_smooth_meanAV_file, levels=[1.0], convention='wells',
+                    colors='black', linewidths=4)
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(r'$(A_{V,emission} / %4.2f) / (\langle A_V \rangle + %4.2f)$' % (ratiofixmean, biasfixmean))
+
+    r = allregion
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region1'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region2
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region2'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region3
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region3'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    ################################################
     # adopt larger fonts and set alpha value
 
     print 'Increasing font size...'
@@ -1392,15 +2078,15 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
 
     # Correlation plot AV  (ghost out low AV points)
 
-    plt.figure(1, figsize=plotfigsize)
+    plt.figure(11, figsize=plotfigsize)
     plt.close()
-    plt.figure(1, figsize=plotfigsize)
+    plt.figure(11, figsize=plotfigsize)
     plt.clf()
     im = plt.plot(AV_img[i_loAV], draineimg[i_loAV], ',', color=greyval, alpha=alpha)
     im = plt.plot(AV_img[i_hiAV], draineimg[i_hiAV], ',', color='black', alpha=alpha)
     plt.xlabel(r'$\widetilde{A_V}$')
     plt.ylabel(r'$A_{V,emission}$')
-    plt.axis([0, 3.5, 0, 12])
+    plt.axis([0, 3.5, -0.25, 12])
     
     exten = '.correlation'
     savefile = output_smooth_AV_root + exten + imgexten
@@ -1409,29 +2095,69 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
 
     # Correlation plot meanAV (ghost out low AV points)
 
-    plt.figure(2, figsize=plotfigsize)
+    plt.figure(12, figsize=plotfigsize)
     plt.close()
-    plt.figure(2, figsize=plotfigsize)
+    plt.figure(12, figsize=plotfigsize)
     plt.clf()
     im = plt.plot(meanAV_img[i_loAV], draineimg[i_loAV], ',', color=greyval, alpha=alpha)
     im = plt.plot(meanAV_img[i_hiAV], draineimg[i_hiAV], ',', color='black', alpha=alpha)
     plt.xlabel(r'$\langle A_V \rangle$')
     plt.ylabel(r'$A_{V,emission}$')
-    plt.axis([0, 3.5, 0, 12])
+    plt.axis([0, 3.5, -0.25, 12])
     
     exten = '.correlation'
     savefile = output_smooth_meanAV_root + exten + imgexten
     print 'Saving correlation plot to ', savefile
     plt.savefig(savefile, bbox_inches=0)
 
+    # corrected Correlation plot AV  (ghost out low AV points)
+
+    plt.figure(21, figsize=plotfigsize)
+    plt.close()
+    plt.figure(21, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(AV_img[i_loAV] + biasfix, draineimg[i_loAV] / ratiofix, ',', color=greyval, alpha=alpha)
+    im = plt.plot(AV_img[i_hiAV] + biasfix, draineimg[i_hiAV] / ratiofix, ',', color='black', alpha=alpha)
+    plt.plot([-1,10], [-1,10], color='red', linewidth=4)
+    plt.xlabel(r'$\widetilde{A_V} + %4.2f$' % biasfix)
+    plt.ylabel(r'$A_{V,emission} / %4.2f$' % ratiofix)
+    plt.axis([-0.25, 3.5, -0.25, 3.5])
+    
+    exten = '.correlationcorr'
+    savefile = output_smooth_AV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # corrected Correlation plot AV  (ghost out low AV points)
+
+    plt.figure(22, figsize=plotfigsize)
+    plt.close()
+    plt.figure(22, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(meanAV_img[i_loAV] + biasfixmean, draineimg[i_loAV] / ratiofixmean, ',', color=greyval, alpha=alpha)
+    im = plt.plot(meanAV_img[i_hiAV] + biasfixmean, draineimg[i_hiAV] / ratiofixmean, ',', color='black', alpha=alpha)
+    plt.plot([-1,10], [-1,10], color='red', linewidth=4)
+    plt.xlabel(r'$\langle A_V \rangle + %4.2f$' % biasfixmean)
+    plt.ylabel(r'$A_{V,emission} / %4.2f$' % ratiofixmean)
+    plt.axis([-0.25, 3.5, -0.25, 3.5])
+    
+    exten = '.correlationcorr'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
     # Ratio plot AV  (ghost out low AV points)
 
-    plt.figure(3, figsize=plotfigsize)
+    AVvec = np.linspace(0.001,10,100)
+    ratiovec = ratiofix * (1.0 + biasfix/AVvec)
+
+    plt.figure(13, figsize=plotfigsize)
     plt.close()
-    plt.figure(3, figsize=plotfigsize)
+    plt.figure(13, figsize=plotfigsize)
     plt.clf()
     im = plt.plot(AV_img[i_loAV], draineimg[i_loAV] / AV_img[i_loAV], ',', color=greyval, alpha=alpha)
     im = plt.plot(AV_img[i_hiAV], draineimg[i_hiAV] / AV_img[i_hiAV], ',', color='black', alpha=alpha)
+    plt.plot(AVvec, ratiovec, color='red', linewidth=4)
     plt.xlabel('$\widetilde{A_V}$')
     plt.ylabel('$A_{V,emission}  /  \widetilde{A_V}$')
     plt.axis([0, 3.5, 0, 7])
@@ -1443,14 +2169,17 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
 
     # Ratio plot meanAV  (ghost out low AV points)
 
-    plt.figure(4, figsize=plotfigsize)
+    ratiovec = ratiofixmean * (1.0 + biasfixmean/AVvec)
+
+    plt.figure(14, figsize=plotfigsize)
     plt.close()
-    plt.figure(4, figsize=plotfigsize)
+    plt.figure(14, figsize=plotfigsize)
     plt.clf()
     im = plt.plot(meanAV_img[i_loAV], draineimg[i_loAV] / meanAV_img[i_loAV], ',', 
                   color=greyval, alpha=alpha)
     im = plt.plot(meanAV_img[i_hiAV], draineimg[i_hiAV] / meanAV_img[i_hiAV], ',', 
                   color='black', alpha=alpha)
+    plt.plot(AVvec, ratiovec, color='red', linewidth=4)
     plt.xlabel(r'$\langle A_V \rangle$')
     plt.ylabel(r'$A_{V,emission}  /  \langle A_V \rangle$')
     plt.axis([0, 3.5, 0, 7])
@@ -1474,6 +2203,8 @@ def compare_img_to_AV(AV, ra_bins, dec_bins, imgfile, AV_resolution_in_arcsec=6.
                       crop='True', outputAVfile='', 
                       usemeanAV=True):
 
+    # Note. Resolutions are assumed to be FWHM
+
     f = pyfits.open(imgfile)
     hdr, img = f[0].header, f[0].data
     wcs = pywcs.WCS(hdr)
@@ -1482,17 +2213,11 @@ def compare_img_to_AV(AV, ra_bins, dec_bins, imgfile, AV_resolution_in_arcsec=6.
     img = img * scaleimgfactor
 
     # make grid of RA and Dec at each pixel
-    ###  NOTE: Switched to make proper img sizes, but may have broken
-    ###  stuff after! Need to debug!
-    #i_ra, i_dec = np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]))
     i_dec, i_ra = np.meshgrid(np.arange(img.shape[1]), np.arange(img.shape[0]))
-    ##i_coords = np.array([[i_ra[i,j],i_dec[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
     i_coords = np.array([[i_dec[i,j],i_ra[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
     print 'img.shape: ', img.shape
     print 'i_dec.shape: ', i_dec.shape
     print 'i_coords.shape: ', i_coords.shape
-
-    #i_coords = np.array([[i_ra[20,30], i_dec[20,30]]])
 
     # solve for RA, dec at those coords
     img_coords = wcs.wcs_pix2sky(i_coords, 1)
@@ -1501,22 +2226,10 @@ def compare_img_to_AV(AV, ra_bins, dec_bins, imgfile, AV_resolution_in_arcsec=6.
     dec_img = img_coords[:,:,1]
     print 'ra_img.shape:', ra_img.shape
 
-    # read A_V data
+    # get coords of  A_V data
 
-    print 'Reading merged AV file.'
-    #avdat = np.load(AVdatafile)
-    #AV = avdat['bestfit_values_clean'][:,:,1]
-    #stddev_over_AV = avdat['bestfit_values_clean'][:,:,2]
-    #if usemeanAV:
-    #    print 'Using Mean A_V, not median'
-    #    ###  NOTE!!! Incorrect -- compensates for error in runs 1-3!!!!
-    #    sig = np.log((1. + np.sqrt(1. + 4. * (stddev_over_AV)**2)) / 2.)
-    #    AV = AV * np.exp(sig**2 / 2.0)
-    #ra_bins = avdat['ra_bins']
-    #dec_bins = avdat['dec_bins']
     racenvec  = (ra_bins[0:-2]  +  ra_bins[1:-1]) / 2.0
     deccenvec = (dec_bins[0:-2] + dec_bins[1:-1]) / 2.0
-    #ra_AV, dec_AV = np.meshgrid(racenvec, deccenvec)
     dec_AV, ra_AV = np.meshgrid(deccenvec, racenvec)
 
     # smooth to match resolution of image
@@ -1534,23 +2247,63 @@ def compare_img_to_AV(AV, ra_bins, dec_bins, imgfile, AV_resolution_in_arcsec=6.
     pixscale = 3600.0 * (dra + ddec) / 2.0
 
     print 'Size of AV image: ', AV.shape
-    if (resolution_in_arcsec != ''): 
-        smootharcsec = np.sqrt(resolution_in_arcsec**2 - AV_resolution_in_arcsec**2)
-        smoothpix = (smootharcsec / pixscale) / 2.0  # since resolution=FWHM
-        print 'Smoothing to ',resolution_in_arcsec,' using ',smoothpix,' pixel wide filter'
 
-        AVsmooth = filt.gaussian_filter(AV, smoothpix, mode='reflect')  
-    else:
-        AVsmooth = AV
-
-    print 'AVsmooth size: ', AVsmooth.shape
+    # prepare information needed to handle edges
     plt.figure(1)
     plt.clf()
-    plt.imshow(AV, vmin=0, vmax=4, cmap='hot')
+    im = plt.imshow(AV, vmin=-0.25, vmax=4, cmap='hot')
+    plt.colorbar(im)
+    plt.suptitle('Original AV')
+
+    mask = np.where(AV > 0, 1., 0.)
+    AV = AV * mask
 
     plt.figure(2)
     plt.clf()
-    plt.imshow(AVsmooth, vmin=0, vmax=4, cmap='hot')
+    plt.imshow(mask, vmin=0, vmax=1, cmap='hot')
+    plt.suptitle('Mask for Original AV')
+
+    plt.figure(3)
+    plt.clf()
+    im = plt.imshow(AV, vmin=-0.25, vmax=4, cmap='hot')
+    plt.colorbar(im)
+    plt.suptitle('Masked Original AV')
+
+    if (resolution_in_arcsec != ''): 
+        # convert FWHM to equivalent gaussian sigma: FWHM = 2*sqrt(2 ln 2) * sigma
+        smootharcsec = np.sqrt(resolution_in_arcsec**2 - AV_resolution_in_arcsec**2) / (2.0*np.sqrt(2.0*np.log(2.0)))
+        smoothpix = (smootharcsec / pixscale) 
+        print 'Smoothing to ',resolution_in_arcsec,' using ',smoothpix,' pixel wide filter'
+
+        AVsmooth = filt.gaussian_filter(AV, smoothpix, mode='reflect')  
+
+        plt.figure(4)
+        plt.clf()
+        im = plt.imshow(AVsmooth, vmin=-0.25, vmax=4, cmap='hot')
+        plt.colorbar(im)
+        plt.suptitle('Smoothed Masked Original AV')
+
+        # correct for masked regions
+
+        masksmooth = filt.gaussian_filter(mask, smoothpix, mode='reflect')  
+
+        plt.figure(5)
+        plt.clf()
+        plt.imshow(masksmooth, vmin=0, vmax=1, cmap='hot')
+        plt.suptitle('Smoothed Mask')
+
+        AVsmooth = (AVsmooth / masksmooth)
+        i_bad = np.where(mask < 1)
+        AVsmooth[i_bad] = 0.0
+
+        plt.figure(6)
+        plt.clf()
+        im = plt.imshow(AVsmooth, vmin=-0.25, vmax=4, cmap='hot')
+        plt.colorbar(im)
+        plt.suptitle('Corrected Smooth AV')
+
+    else:
+        AVsmooth = AV
 
     # interpolate ra on ra_bins and dec on dec_bins to get coordinates in AV image
     # grab nearest pixel in A_V image (possible off-by-one?) and copy into copy of img
@@ -1567,7 +2320,7 @@ def compare_img_to_AV(AV, ra_bins, dec_bins, imgfile, AV_resolution_in_arcsec=6.
     # turn into int referencing appropriate bin
     #x_AV = np.round(x_AV).astype(int)
     #y_AV = np.round(y_AV).astype(int)
-    x_AV = np.round(x_AV+1).astype(int)  # why +1? seems to work best...
+    x_AV = np.round(x_AV+1).astype(int)  # why +1? seems to work best...(tested all +,0,- 8/13-- no difference!)
     y_AV = np.round(y_AV+1).astype(int)
 
     # substitute AV values into appropriate pixels, provided they're in range

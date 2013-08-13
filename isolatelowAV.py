@@ -5,6 +5,8 @@ import makefakecmd as mfcmd
 import fit_disk as fitdisk
 import os.path as op
 import matplotlib.pyplot as plt
+import pyfits as pyfits
+import pywcs as pywcs
 from scipy.interpolate import interp1d
 from scipy import ndimage
 
@@ -581,12 +583,19 @@ def return_ra_dec_for_radius(r):
 
     return ra, dec
     
-def plot_allbricks_ra_dec(saveplots = True):
+def plot_allbricks_ra_dec(saveplots = True, makenoise = False):
 
     resultsdir = '../Unreddened/FourthRun15arcsec/'
     fileroot = resultsdir + 'allbricks'
     savefilename = fileroot + '.npz'
     newsavefilename = fileroot + '.clean.npz'
+    noise_tweek = 0.0
+    if (makenoise == True):
+        noise_tweek = 0.0075
+        print 'Making noise file with more generous selection'
+        newsavefilename = fileroot + '.noise.clean.npz'
+        print 'Not saving images'
+        saveplots = False
     
     rplot_vec = [0.25, 0.55, 1.05]
 
@@ -598,9 +607,6 @@ def plot_allbricks_ra_dec(saveplots = True):
     print ra.shape
     print nstarmodelgrid.shape
 
-    # add random offset to nstar to blur points (OBSOLETE AFTER SWITCHING TO SURFACE DENSITY)
-    #nstargrid_blur = nstargrid + np.random.uniform(-0.5, 0.5, nstargrid.shape)
-
     # set selection of low extinction points off of log(nstar) vs rgb
     # width (cstd)  (optimized for 15 arcsec selection)
 
@@ -611,6 +617,15 @@ def plot_allbricks_ra_dec(saveplots = True):
     ref_lgn = -0.5
     ref_rgbw = 0.05
     min_radius = 0.1
+
+    # tweak selection to be more generous if selecting noise files
+    b_rgbw = b_rgbw + noise_tweek
+    b_rgbw_lo = b_rgbw_lo + noise_tweek
+
+    # tweak selection to be a bit more generous when using Draine AV as a cross check
+    b_tweek = 0.0075
+    b_rgbw = b_rgbw + b_tweek
+    b_rgbw_lo = b_rgbw_lo + b_tweek
 
     # fit polynomial to nstar vs mean color, doing some sensible rejection & iteration
     a_cm = -0.06
@@ -632,6 +647,30 @@ def plot_allbricks_ra_dec(saveplots = True):
     print 'Dispersion: ', rgbcm_stddev
     cm_stddev_range=[2.0, 5.0]
 
+    # cross-reference with Draine AV map to isolate regions that also have low dust
+    # emission
+
+    drainefile = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.AV.fits'
+    print 'Opening Draine image...'
+    f = pyfits.open(drainefile)
+    hdr, draineimg = f[0].header, f[0].data
+
+    # get ra dec of draine image
+    wcs = pywcs.WCS(hdr)
+    # get Draine pixel locations
+    img_coords = wcs.wcs_sky2pix(ra, dec, 1)
+    img_coords_grid = wcs.wcs_sky2pix(ragrid, decgrid, 1)
+
+    # grab values at those locations
+    draineAV = draineimg[np.rint(img_coords[0]).astype('int'),
+                         np.rint(img_coords[1]).astype('int')]
+    draineAVgrid = draineimg[np.rint(img_coords_grid[0]).astype('int'),
+                             np.rint(img_coords_grid[1]).astype('int')]
+    
+    # Set Draine A_V limit
+    draineratiofix = 2.3
+    draineAVlim = 0.25 * draineratiofix
+
     # Generate indices for grid points and all stars that meet
     # likely low-extinction criteria.
 
@@ -641,14 +680,16 @@ def plot_allbricks_ra_dec(saveplots = True):
                             (cmgrid < p_n_cm(np.log10(nstargrid))  
                              + cm_stddev_range[0]*rgbcm_stddev) & 
                             (cmgrid > p_n_cm(np.log10(nstargrid)) 
-                                 - cm_stddev_range[1]*rgbcm_stddev))
+                                 - cm_stddev_range[1]*rgbcm_stddev) &
+                            (draineAVgrid < draineAVlim))
     i_lowAV_stars = np.where(((cstd < b_rgbw +  a_rgbw * (np.log10(nstar) - ref_lgn)) |
                               (cstd < b_rgbw_lo +  a_rgbw_lo * (np.log10(nstar) - ref_lgn))) & 
                              (r > min_radius)  & 
                              (cm < p_n_cm(np.log10(nstar))  
                               + cm_stddev_range[0]*rgbcm_stddev) & 
                              (cm > p_n_cm(np.log10(nstar)) 
-                              - cm_stddev_range[1]*rgbcm_stddev))
+                              - cm_stddev_range[1]*rgbcm_stddev) &
+                            (draineAV < draineAVlim))
 
     # save data from low extinction regions to file
     # save clean data to a new file
@@ -1535,7 +1576,10 @@ def make_radial_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
             color_mag_datamask = mask_array[:,:,i]
             nfg = (cmd_n * color_mag_datamask).sum()
             nnoise = (noise_model * color_mag_datamask).sum()
-            frac_noise = nnoise / nfg
+            if (nfg == 0): 
+                frac_noise = 0.0
+            else:
+                frac_noise = nnoise / nfg
             print 'ilo: ', i_lo, ' ihi: ', i_hi, ' Noise fraction: ', frac_noise
 
             # do a rough normalization (will have to redo after radial interpretation and data mask)
@@ -1878,7 +1922,10 @@ def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
             color_mag_datamask = mask_array[:,:,i]
             nfg = (cmd_n * color_mag_datamask).sum()
             nnoise = (noise_model * color_mag_datamask).sum()
-            frac_noise = nnoise / nfg
+            if (nfg == 0): 
+                frac_noise = 0
+            else:
+                frac_noise = nnoise / nfg
             print 'ilo: ', i_lo, ' ihi: ', i_hi, ' Noise fraction: ', frac_noise
 
             # do a rough normalization (will have to redo after radial interpretation and data mask)
@@ -1999,7 +2046,7 @@ def plot_RGB_locii(plotfileroot='../Unreddened/lowAV_RGB'):
     arrowhead = 0.01
     plt.arrow(mref, sigref, 0*AV, Amag_AV*AV-arrowhead, width=0.05, color='r', 
               head_length=arrowhead)
-    plt.annotate(r"$A_V=0.25$", xy=(24.1,0.025), xytext=None, )
+    plt.annotate(r"$A_V=0.25$", xy=(24.1,0.025), xytext=None )
 
     plt.savefig(plotfileroot+'.width.png', bbox_inches=0)
 
