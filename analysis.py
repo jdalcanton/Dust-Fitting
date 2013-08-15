@@ -20,6 +20,7 @@ import pywcs as pywcs
 import makefakecmd as mfc
 import aplpy as aplpy
 from astropy.io import fits
+from astropy import wcs
 
 def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], 
                   resultsdir='../Results/', fileextension='',
@@ -1150,6 +1151,8 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     output_smooth_meanAV_root = resultsdir + fileroot + '_interleaved_draine_smoothed.meanAV'
     output_smooth_AV_file = output_smooth_AV_root + '.fits'
     output_smooth_meanAV_file = output_smooth_meanAV_root + '.fits'
+    output_chi2_AV_file = output_smooth_AV_root + '.AV_chi2' + imgexten
+    output_chi2_meanAV_file = output_smooth_AV_root + '.meanAV_chi2' + imgexten
         
     # median extinction
     arrayname = 'bestfit_values' + cleanstr
@@ -1309,16 +1312,27 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
 
     dchi_max = 1.0
 
+    print 'Increasing font size...'
+    font = {'weight': '500',
+            'size': '18'}
+    plt.rc('font', **font)
+
     plt.figure(30)
-    plt.clf()
+    plt.close()
+    plt.figure(30, figsize=(12,10))
     im = plt.imshow(chi2vec,  vmax=np.min(chi2vec) + dchi_max,
-                    extent=[Rrange[0], Rrange[1], biasrange[0], biasrange[1]], aspect='auto', origin='lower',
+                    extent=[Rrange[0], Rrange[1], biasrange[0], biasrange[1]], 
+                    aspect='auto', origin='lower',
                     cmap='gist_ncar', interpolation='nearest')
     plt.colorbar(im)
+    plt.axis([Rrange[0], Rrange[1], biasrange[0], biasrange[1]])
     plt.plot(minRglobal, minbiasglobal, '*', markersize=20, color='white')
-    plt.xlabel('$A_V$ Ratio (Emission / Extinction)')
+    plt.xlabel('$A_V$ Ratio (Emission / CMD)')
     plt.ylabel(r'$\widetilde{A_V}$ Bias')
-    plt.suptitle('Fitting $\widetilde{A_V} > %5.3f$' % AVlim)
+    plt.annotate('Fitting $\widetilde{A_V} > %4.2f$' % AVlim,
+                     xy=(0.95, 0.90), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.savefig(output_chi2_AV_file, bbox_inches=0)
     
     # ...then mean AV....
 
@@ -1343,15 +1357,26 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     dchi_max = 1.0
 
     plt.figure(3)
-    plt.clf()
+    plt.close()
+    plt.figure(3, figsize=(12,10))
     im = plt.imshow(chi2vec,  vmax=np.min(chi2vec) + dchi_max,
-                    extent=[Rrange[0], Rrange[1], biasrange[0], biasrange[1]], aspect='auto', origin='lower',
+                    extent=[Rrange[0], Rrange[1], biasrange[0], biasrange[1]], 
+                    aspect='auto', origin='lower',
                     cmap='gist_ncar', interpolation='nearest')
     plt.colorbar(im)
+    plt.axis([Rrange[0], Rrange[1], biasrange[0], biasrange[1]])
     plt.plot(minRglobal, minbiasglobal, '*', markersize=20, color='white')
-    plt.xlabel('$A_V$ Ratio (Emission / Extinction)')
+    plt.xlabel('$A_V$ Ratio (Emission / CMD)')
     plt.ylabel(r'$\langle A_V \rangle$ Bias')
-    plt.suptitle('Fitting $\widetilde{A_V} > %5.3f$' % AVlim)
+    plt.annotate('Fitting $\widetilde{A_V} > %4.2f$' % AVlim,
+                     xy=(0.95, 0.90), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.savefig(output_chi2_meanAV_file, bbox_inches=0)
+
+    # restore font size
+    print 'Restoring original font defaults...'
+    plt.rcdefaults()
+
     
     # set up info to analyze bias as a function of ln-nstar
 
@@ -4054,5 +4079,99 @@ def fix_epoch_in_gas_header_and_flatten():
 
     return
 
+def plot_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2, 
+                            imgexten='.png', plot_error_distribution=False):
 
+    resultsdir = '../Results/'
+    fileroot = 'merged_interleave'
+    AVfile = resultsdir + fileroot + '.AV.fits'
+    AVerrfile = resultsdir + fileroot + '.AVerr.fits'
+    ffile = resultsdir + fileroot + '.fred.fits'
+    ferrfile = resultsdir + fileroot + '.ferr.fits'
+    output_fred_map_file = resultsdir + fileroot + '.goodfredmap' + imgexten
     
+    hdulist = fits.open(AVfile)
+    AV = hdulist[0].data
+    hdr = hdulist[0].header
+    hdulist.close()
+
+    hdulist = fits.open(AVerrfile)
+    AVerr = hdulist[0].data
+    hdulist.close()
+
+    hdulist = fits.open(ffile)
+    f = hdulist[0].data
+    hdulist.close()
+
+    hdulist = fits.open(ferrfile)
+    ferr = hdulist[0].data
+    hdulist.close()
+    
+    # calculate fractional error
+
+    i_good = np.where(AV > 0)
+    i_bad =  np.where(AV <= 0)
+
+    AVfracerr = AVerr / AV
+    AVfracerr[i_bad] = 0
+
+    # keep only high extinction, high reliability points
+
+    i_keep = np.where((AV > AVthresh) & (AVfracerr < AVfracerrthresh) & (ferr < ferrthresh))
+    i_ra = i_keep[1]
+    i_dec = i_keep[0]
+
+    # set up WCS and get ra, dec of good pixels
+    
+    w = wcs.WCS(hdr)
+    ra_dec_coords = w.wcs_pix2world([[i_ra[i], i_dec[i]] for i in range(len(i_ra))], 1)
+    print ra_dec_coords.shape
+
+    # make nicer output
+    print 'Increasing font size...'
+    font = {'weight': '500',
+            'size': '18'}
+    plt.rc('font', **font)
+
+    #
+    plt.figure(1)
+    plt.close()
+    plt.figure(1, figsize=(12,10))
+    im = plt.scatter(ra_dec_coords[:,0], ra_dec_coords[:,1], c=f[i_keep], linewidth=0, s=4,
+                     vmin=0.1, vmax=0.9)
+    color_bar = plt.colorbar(im)
+    color_bar.ax.set_aspect(50.)
+    color_bar.set_label('$f_{red}$')
+    color_bar.draw_all()
+    plt.axis([12., 10.5, 41.1, 42.4])
+    plt.xlabel('RA')
+    plt.ylabel('Dec')
+    plt.annotate('$\widetilde{A_V} > %4.2f$' % AVthresh,
+                     xy=(0.95, 0.90), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.annotate('$\Delta f_{red} > %3.1f$' % ferrthresh,
+                     xy=(0.95, 0.85), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.draw()
+    print 'Saving map to ', output_fred_map_file
+    plt.savefig(output_fred_map_file, bbox_inches=0)
+
+
+    if (plot_error_distribution):
+        i_ok = np.where(AV > 1)
+        plt.figure(2)
+        plt.clf()
+        im = plt.scatter(AVfracerr[i_ok], ferr[i_ok], c=AV[i_ok], linewidth=0, s=4,alpha=0.1,
+                         vmin=1, vmax=3)
+        plt.colorbar(im)
+        plt.plot([0,0.15],[ferrthresh,ferrthresh], color='red', linewidth=3)
+        plt.plot([AVfracerrthresh,AVfracerrthresh],[0,0.3], color='red', linewidth=3)
+        plt.axis([0, 0.15, 0, 0.3])
+        plt.xlabel('$\Delta A_V / A_V$')
+        plt.ylabel('$\Delta f_{red}$')
+        
+    # restore font size
+    print 'Restoring original font defaults...'
+    plt.rcdefaults()
+
+    return

@@ -1694,10 +1694,13 @@ def ln_priors(p, return_prior_parameters=False):
     p0mean = 0.0              # symmetric in x means mean of f=0.5
     p0stddev = 1.5
 
-    # set up lognormal for x
+    # set up lognormal for x, using AV-dependent prior on the width.
     p0mode = -p0[0]             # symmetric in x means mean of f=0.5
     p0offset = p0[0]
-    p0sigma = 2.0  
+    bsig0 = -0.5
+    asig0 = 1.0
+    sig0max = 100.
+    p0sigma = min(10.0**(bsig0 + asig0*p[1]), sig0max)
     p0mu = np.log(p0mode) + p0sigma**2   # mu = ln(median)
 
     # set up log normal for sigma, keeping same mode
@@ -1709,6 +1712,7 @@ def ln_priors(p, return_prior_parameters=False):
 
         return {'p0': p0, 'p1': p1, 'p2': p2, 
                 'p0mode': p0mode, 'p0sigma': p0sigma,   'p0mu': p0mu, 'p0offset': p0offset,
+                'bsig0': bsig0, 'asig0': asig0, 'sig0max': sig0max,
                 'p2mode': p2mode, 'p2sigma': p2sigma,   'p2mu': p2mu}
 
     else: 
@@ -2040,9 +2044,9 @@ def plot_bestfit_results(results_file = resultsdir + fnroot+'.npz',
 
     # Uncertainty results
 
-    #sigf = (p[:,:,2] - p[:,:,0]) / 2.0
-    #sigA = (p[:,:,5] - p[:,:,3]) / 2.0
-    #sigw = (p[:,:,8] - p[:,:,6]) / 2.0
+    sigf = (p[:,:,2] - p[:,:,0]) / 2.0
+    sigA = (p[:,:,5] - p[:,:,3]) / 2.0
+    sigw = (p[:,:,8] - p[:,:,6]) / 2.0
 
     plt.figure(4)
     plt.close()
