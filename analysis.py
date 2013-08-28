@@ -2233,19 +2233,25 @@ def compare_img_to_AV(AV, ra_bins, dec_bins, imgfile, AV_resolution_in_arcsec=6.
     f = pyfits.open(imgfile)
     hdr, img = f[0].header, f[0].data
     wcs = pywcs.WCS(hdr)
+    #wcs.wcs.print_contents()    
 
     # scale image by arbitrary factor to bring onto AV
     img = img * scaleimgfactor
 
     # make grid of RA and Dec at each pixel
     i_dec, i_ra = np.meshgrid(np.arange(img.shape[1]), np.arange(img.shape[0]))
-    i_coords = np.array([[i_dec[i,j],i_ra[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
+    if (wcs.wcs.naxis == 2):
+        i_coords = np.array([[i_dec[i,j],i_ra[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
+    if (wcs.wcs.naxis == 3):
+        i_coords = np.array([[i_dec[i,j],i_ra[i,j],0] for (i,j),val in np.ndenumerate(i_ra)])
     print 'img.shape: ', img.shape
     print 'i_dec.shape: ', i_dec.shape
     print 'i_coords.shape: ', i_coords.shape
 
     # solve for RA, dec at those coords
     img_coords = wcs.wcs_pix2sky(i_coords, 1)
+    if (wcs.wcs.naxis > 2):
+        img_coords = img_coords[:,0:2]
     img_coords = np.reshape(img_coords,(i_ra.shape[0],i_ra.shape[1],2))
     ra_img  = img_coords[:,:,0]
     dec_img = img_coords[:,:,1]
@@ -2369,6 +2375,19 @@ def compare_img_to_AV(AV, ra_bins, dec_bins, imgfile, AV_resolution_in_arcsec=6.
 
     # if requested, output AV_image
     if (outputAVfile != ''):
+        # fix up header if there's lingering velocity info...
+        if ((hdr['NAXIS'] == 2) & ('CTYPE3' in hdr)):
+            print 'Removing unneccessary 3rd axis from header'
+            if ('CTYPE3' in hdr):
+                del hdr['CTYPE3']
+            if ('CRVAL3' in hdr):
+                del hdr['CRVAL3']
+            if ('CDELT3' in hdr):
+                del hdr['CDELT3']
+            if ('CRPIX3' in hdr):
+                del hdr['CRPIX3']
+            if ('CROTA3' in hdr):
+                del hdr['CROTA3']
         print 'Writing output to ',outputAVfile
         pyfits.writeto(outputAVfile, AV_img, hdr)
 
@@ -2739,14 +2758,31 @@ def plot_cumulative_log_normal():
     nsig = len(sigvec)
     p = np.zeros((nsig,len(A_over_Amedian)))
 
+    # initialize fit to log-normal tail
+    Athresh = 1.0
+    lg10pthresh = -2.
+    npoly = 1
+    linfitparam = np.zeros((nsig,2))
+
     for i, sig in enumerate(sigvec):
         
         p[i,:] = 0.5*spec.erfc(np.log(A_over_Amedian)/(sig*np.sqrt(2)))
+        
+        # fit linear relationship to high A_over_Amedian points
+        i_hi = np.where((A_over_Amedian > Athresh) & (np.log10(p[i,:]) > lg10pthresh))
+        x = A_over_Amedian[i_hi]
+        y = np.log10(p[i,i_hi].flatten())
+        linfitparam[i,:] = np.polyfit(x, y, npoly)
+        print sig, linfitparam[i,:], linfitparam[i,:] * sig, linfitparam[i,:] * sig**2
 
     plt.figure(1)
     plt.clf()
     plt.plot([1, 1],[-6,1],linewidth=0.5, color='grey')
     plt.plot([0, 10],[-1,-1],linewidth=0.5, color='grey')
+    for i, sig in enumerate(sigvec):
+        poly = np.poly1d(linfitparam[i,:])
+        plt.plot(A_over_Amedian, poly(A_over_Amedian), color='red', linewidth=0.5)
+
     p1 = plt.plot(A_over_Amedian, np.log10(p[0,:]), linewidth=2, color='black')
     p2 = plt.plot(A_over_Amedian, np.log10(p[1,:]), linewidth=3, color='black')
     p3 = plt.plot(A_over_Amedian, np.log10(p[2,:]), linewidth=5, color='black')
@@ -2755,6 +2791,27 @@ def plot_cumulative_log_normal():
     plt.ylabel(r"$log_{10} p(> A / A_{median} | \sigma_A)$")
 
     plt.legend([p1,p2,p3], ["$\sigma_A=0.3$", "$\sigma_A=0.5$", "$\sigma_A=0.7$"], frameon=False)
+
+    return
+
+def plot_mass_area(A_thresh = 1.0):
+
+    # investigate fraction of cloud area above given AV threshold (as in Beaumont et al 2012)
+    # as a function of changing median A_V
+
+    sig = 0.4
+    A_median = np.linspace(0, 5., 100)
+
+    p = 0.5*spec.erfc(np.log(A_thresh / A_median)/(sig*np.sqrt(2)))
+        
+    plt.figure(1)
+    plt.clf()
+    plt.plot([A_thresh, A_thresh],[-6,1],linewidth=0.5, color='grey')
+    plt.plot([0, 10],[-1,-1],linewidth=0.5, color='grey')
+    plt.plot(A_median, np.log10(p), linewidth=3, color='black')
+    plt.axis([0,4,-2,0.05])
+    plt.xlabel(r"$A_{median}$")
+    plt.ylabel(r'$log_{10} p(> A_{thresh}=%3.1f | \sigma_A=%3.1f)$' % (A_thresh,sig))
 
     return
 
@@ -4089,6 +4146,7 @@ def plot_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     ffile = resultsdir + fileroot + '.fred.fits'
     ferrfile = resultsdir + fileroot + '.ferr.fits'
     output_fred_map_file = resultsdir + fileroot + '.goodfredmap' + imgexten
+    output_fred_angle_file = resultsdir + fileroot + '.fredangle' + imgexten
     
     hdulist = fits.open(AVfile)
     AV = hdulist[0].data
@@ -4125,7 +4183,20 @@ def plot_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     
     w = wcs.WCS(hdr)
     ra_dec_coords = w.wcs_pix2world([[i_ra[i], i_dec[i]] for i in range(len(i_ra))], 1)
+    ra = ra_dec_coords[:,0]
+    dec = ra_dec_coords[:,1]
     print ra_dec_coords.shape
+
+    # get angle relative to center
+
+    # center of bulge
+    m31ra  = 10.6847929
+    m31dec = 41.2690650    
+    dra = (ra - m31ra) * np.cos(np.math.pi * m31dec / 180.0)
+    ddec = (dec - m31dec)
+    theta = 90. - np.arctan(ddec / dra) * 180. / np.math.pi
+    r = iAV.get_major_axis(ra, dec)
+    
 
     # make nicer output
     print 'Increasing font size...'
@@ -4137,7 +4208,7 @@ def plot_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     plt.figure(1)
     plt.close()
     plt.figure(1, figsize=(12,10))
-    im = plt.scatter(ra_dec_coords[:,0], ra_dec_coords[:,1], c=f[i_keep], linewidth=0, s=4,
+    im = plt.scatter(ra, dec, c=f[i_keep], linewidth=0, s=4,
                      vmin=0.1, vmax=0.9)
     color_bar = plt.colorbar(im)
     color_bar.ax.set_aspect(50.)
@@ -4149,13 +4220,33 @@ def plot_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     plt.annotate('$\widetilde{A_V} > %4.2f$' % AVthresh,
                      xy=(0.95, 0.90), fontsize=20, horizontalalignment='right',
                      xycoords = 'axes fraction')
-    plt.annotate('$\Delta f_{red} > %3.1f$' % ferrthresh,
+    plt.annotate('$\Delta f_{red} < %3.1f$' % ferrthresh,
                      xy=(0.95, 0.85), fontsize=20, horizontalalignment='right',
                      xycoords = 'axes fraction')
     plt.draw()
     print 'Saving map to ', output_fred_map_file
     plt.savefig(output_fred_map_file, bbox_inches=0)
 
+
+    plt.figure(3)
+    plt.close()
+    fig = plt.figure(3, figsize=(14,10))
+    ax = fig.add_axes([.1, 0.1, 0.8, 0.8])
+    im = ax.scatter(theta, f[i_keep], c=r, linewidth=0, s=10, vmin=0.15, vmax=1.3, cmap='hsv')
+    color_bar = plt.colorbar(im)
+    color_bar.ax.set_aspect(50.)
+    color_bar.set_label('Radius (Degrees)')
+    color_bar.draw_all()
+    ax.axis([23,100,0.1,0.9])
+    ax.set_xlabel(r'$\theta$ (degrees)')
+    ax.set_ylabel(r'$f_{red}$')
+    # now add zoomed inset
+    ax_inset = fig.add_axes([.365, 0.41, 0.37, 0.465])
+    ax_inset.scatter(theta, f[i_keep], c=r, linewidth=0, s=5, vmin=0.15, vmax=1.3, cmap='hsv')
+    ax_inset.plot([25.05, 49.9], [0.5, 0.5],color='black')
+    ax_inset.axis([25.05, 49.9, 0.1, 0.899])
+    print 'Saving map to ', output_fred_angle_file
+    plt.savefig(output_fred_angle_file, bbox_inches=0)
 
     if (plot_error_distribution):
         i_ok = np.where(AV > 1)
@@ -4175,3 +4266,713 @@ def plot_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     plt.rcdefaults()
 
     return
+
+def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgexten='.png'):
+
+    resultsfile = resultsdir + resultsfileroot + '.npz'
+    imgfile = resultsdir + resultsfileroot + '.AV_sig_vs_MW' + imgexten
+    dat = np.load(resultsfile)
+    
+    AV = dat['bestfit_values_clean'][:,:,1].flatten()
+    sig = dat['bestfit_values_clean'][:,:,2].flatten()
+    i_good = np.where(AV > 0)
+
+    # Data from Table 2 of Lombardi, Alves, & Lada 2010, but original
+    # from Kainailanen et al 2009 -- MW molecular clouds
+    #
+    # see milkywayMC.dat
+
+    AK_MW  = np.array([0.15, 0.38, 0.18, 0.08, 0.16, 0.33, 0.11, 0.12, 
+                       0.14, 0.10, 0.12, 0.42, 0.10, 0.14, 0.12, 0.15, 
+                       0.08, 0.12, 0.13, 0.13, 0.11, 0.16, 0.14])
+    AK_AV = 0.112
+    AV_MW = AK_MW / AK_AV
+
+    sig_MW = np.array([0.42, 0.28, 0.49, 0.43, 0.48, 0.51, 0.35, 0.35, 
+                       0.35, 0.44, 0.32, 0.29, 0.39, 0.41, 0.38, 0.50, 
+                       0.45, 0.46, 0.50, 0.48, 0.49, 0.59, 0.51])
+
+    SF_MW  = np.array([0, 0, 1, 1, 1, 1, 1, 1, 
+                       1, 1, 1, 1, 1, 1, 1, 0, 
+                       0, 0, 1, 1, 1, 1, 1])
+
+    resolution_MW = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 
+                              0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 
+                              0.1, 0.1, 0.6, 0.6, 0.6, 0.6, 0.6])
+
+    i_SF = np.where(SF_MW == 1)
+    i_noSF = np.where(SF_MW == 0)
+    i_lores = np.where(resolution_MW == 0.6)
+    i_hires = np.where(resolution_MW == 0.1)
+    i_SF_lores = np.where((SF_MW == 1) & (resolution_MW == 0.6))
+    i_SF_hires = np.where((SF_MW == 1) & (resolution_MW == 0.1))
+    i_noSF_lores = np.where((SF_MW == 0) & (resolution_MW == 0.6))
+    i_noSF_hires = np.where((SF_MW == 0) & (resolution_MW == 0.1))
+
+    AVrange = [0.,5.]
+    sigrange = [0., 1.]
+    nbins = [100, 100]
+    hist, sigedge, AVedge = np.histogram2d(sig[i_good], AV[i_good], normed=True, 
+                                           range=[sigrange, AVrange], 
+                                           bins=nbins)
+    extentvec = [AVedge[0], AVedge[-1], sigedge[0], sigedge[-1]]
+
+    # make nicer output
+    print 'Increasing font size...'
+    font = {'weight': '500',
+            'size': '18'}
+    plt.rc('font', **font)
+
+    # plot distributions
+    plt.figure(1)
+    plt.close()
+    plt.figure(1, figsize=(10,9))
+    im = plt.imshow(np.log10(hist), vmin=-3, vmax=0.5, aspect='auto', 
+                    extent=extentvec, origin='lower', cmap='gray_r', interpolation='nearest')
+    #plt.colorbar(im)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\sigma$')
+    plt.plot(AV_MW[i_SF_lores], sig_MW[i_SF_lores], '*', color='red', 
+             ms=18, markeredgewidth=1)
+    plt.plot(AV_MW[i_noSF_lores], sig_MW[i_noSF_lores], 'o', color='red', 
+             ms=10, markeredgewidth=1)
+    plt.plot(AV_MW[i_SF_hires], sig_MW[i_SF_hires], '*', color='#0040FF', 
+             ms=18, markeredgewidth=1)
+    plt.plot(AV_MW[i_noSF_hires], sig_MW[i_noSF_hires], 'o', color='cyan', 
+             ms=10, markeredgewidth=1)
+    print 'Saving plot to ' + imgfile
+    plt.savefig(imgfile, bbox_inches=0)
+
+    # plot distributions
+    plt.figure(2)
+    plt.close()
+    plt.figure(2, figsize=(10,9))
+    plt.plot(AV, sig, ',', alpha=0.1, color='black')
+    plt.axis(extentvec)
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\sigma$')
+    plt.plot(AV_MW[i_SF_lores], sig_MW[i_SF_lores], '*', color='red', ms=15)
+    plt.plot(AV_MW[i_noSF_lores], sig_MW[i_noSF_lores], 'o', color='red', ms=10)
+    plt.plot(AV_MW[i_SF_hires], sig_MW[i_SF_hires], '*', color='blue', ms=15)
+    plt.plot(AV_MW[i_noSF_hires], sig_MW[i_noSF_hires], 'o', color='blue', ms=10)
+
+    # restore font size
+    print 'Restoring original font defaults...'
+    plt.rcdefaults()
+
+def plot_final_totgas_compare(fileroot='merged', resultsdir='../Results/',
+                              cleanstr = '_clean', imgexten='.png',
+                              write_fits = 'False', write_ratio_fits = 'True',
+                              gasimgscale = 1.8e21,
+                              biasfix = 0.26, ratiofix=1.0,
+                              biasfixmean = 0.275, ratiofixmean=1.0,
+                              smooth_img=0):
+
+    gasfile = '../GasMaps/working/tg_old_wsrt_at_45.fits'  # in atoms / cm^2
+    gasresolution = 45.0   # FWHM
+    AVresolution = 6.645      # FWHM
+    output_smooth_AV_root = resultsdir + fileroot + '_interleaved_gas_smoothed.AV'
+    output_smooth_meanAV_root = resultsdir + fileroot + '_interleaved_gas_smoothed.meanAV'
+    output_smooth_AV_file = output_smooth_AV_root + '.fits'
+    output_smooth_meanAV_file = output_smooth_meanAV_root + '.fits'
+    output_smooth_AV_ratio_file = output_smooth_AV_root + '.ratio.fits'
+    output_smooth_meanAV_ratio_file = output_smooth_meanAV_root + '.ratio.fits'
+    output_smooth_AV_ratiocorr_file = output_smooth_AV_root + '.ratiocorr.fits'
+    output_smooth_meanAV_ratiocorr_file = output_smooth_meanAV_root + '.ratiocorr.fits'
+        
+    # median extinction
+    arrayname = 'bestfit_values' + cleanstr
+    arraynum = 1
+    a, ra_bins, dec_bins = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                                           arrayname=arrayname, 
+                                           arraynum=arraynum)
+    AV = a
+    print 'Size of extinction map: ', AV.shape
+
+    # mean extinction
+    if (fileroot == 'merged'):
+        arrayname = 'dervied_values' + cleanstr  #  note mispelling!
+    else:
+        arrayname = 'derived_values' + cleanstr
+    arraynum = 0
+    a, ra_bins, dec_bins = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                                           arrayname=arrayname, 
+                                           arraynum=arraynum)
+    meanAV = a
+
+    # run the smoothing algorithm on both A_V maps
+
+    if (write_fits == 'True'):
+
+        wcs, im_coords, gasimg, AV_img = compare_img_to_AV(AV, ra_bins, dec_bins, gasfile, 
+                                                           crop='True',
+                                                           scaleimgfactor = 1.0,
+                                                           resolution_in_arcsec=gasresolution, 
+                                                           AV_resolution_in_arcsec=AVresolution, 
+                                                           outputAVfile=output_smooth_AV_file)
+        wcs, im_coords, gasimg, meanAV_img = compare_img_to_AV(meanAV, ra_bins, dec_bins, gasfile, 
+                                                               crop='True',
+                                                               scaleimgfactor = 1.0,
+                                                               resolution_in_arcsec=gasresolution, 
+                                                               AV_resolution_in_arcsec=AVresolution, 
+                                                               outputAVfile=output_smooth_meanAV_file)
+
+    # read from fits files (guarantees consistency -- compare_img_to_AV returns cropped version, but FITS=full)
+
+    f = pyfits.open(output_smooth_AV_file)
+    AV_img = f[0].data
+    f = pyfits.open(output_smooth_meanAV_file)
+    meanAV_img = f[0].data
+
+    f = pyfits.open(gasfile)
+    hdr, gasimg = f[0].header, f[0].data
+    wcs = pywcs.WCS(hdr)
+    
+    print 'Rescaling gas image by %g for clarity' % gasimgscale
+    gasimg = gasimg / gasimgscale
+
+    # smooth images to reduce noise, if requested
+    if (smooth_img > 0):
+
+        print 'Boxcar smoothing images to reduce noise, using width ', int(smooth_img)
+        gasimg = scipy.stsci.convolve.boxcar(gasimg, (int(smooth_img), int(smooth_img)))
+        AV_img = scipy.stsci.convolve.boxcar(AV_img, (int(smooth_img), int(smooth_img)))
+        meanAV_img = scipy.stsci.convolve.boxcar(meanAV_img, (int(smooth_img), int(smooth_img)))
+
+    # get ra dec of gas image
+
+    i_dec, i_ra = np.meshgrid(np.arange(gasimg.shape[1]), np.arange(gasimg.shape[0]))
+    i_coords = np.array([[i_dec[i,j],i_ra[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
+    if (wcs.wcs.naxis == 3):
+        i_coords = np.array([[i_dec[i,j],i_ra[i,j],0] for (i,j),val in np.ndenumerate(i_ra)])
+    print 'gasimg.shape: ', gasimg.shape
+    print 'i_dec.shape: ', i_dec.shape
+    print 'i_coords.shape: ', i_coords.shape
+    # solve for RA, dec at those coords
+    img_coords = wcs.wcs_pix2sky(i_coords, 1)
+    if (wcs.wcs.naxis > 2):
+        img_coords = img_coords[:,0:2]
+    img_coords = np.reshape(img_coords,(i_ra.shape[0],i_ra.shape[1],2))
+    ra  = img_coords[:,:,0]
+    dec = img_coords[:,:,1]
+
+    lgnstar = np.log10(iAV.get_nstar_at_ra_dec(ra, dec, renormalize_to_surfdens=True))
+
+    # select regions for analysis
+
+    mask = np.where(AV_img > 0, 1.0, 0.0)
+    i_masked = np.where(mask == 0)
+    i_unmasked = np.where(mask > 0)
+    mask_loAV = np.where(AV_img > 0.25, 1.0, 0.0)
+    i_loAV = np.where((mask_loAV == 0) & (mask > 0))
+    i_hiAV = np.where(mask_loAV > 0)
+
+    AVratio = gasimg / AV_img 
+    meanAVratio = gasimg / meanAV_img
+    AVratiocorr = (gasimg / ratiofix) / (AV_img + biasfix)
+    meanAVratiocorr = (gasimg / ratiofixmean) / (meanAV_img + biasfixmean)
+    # clean up masked regions -- do replacement to deal with NaN's in divisions.
+    AVratio[i_masked] = 0.0
+    meanAVratio[i_masked] = 0.0
+    AVratiocorr[i_masked] = 0.0
+    meanAVratiocorr[i_masked] = 0.0
+
+    # write ratio fits files
+
+    if (write_ratio_fits == 'True'):
+        print ' Writing ratio maps'
+        pyfits.writeto(output_smooth_AV_ratio_file, AVratio, header=hdr)
+        pyfits.writeto(output_smooth_meanAV_ratio_file, meanAVratio, header=hdr)
+        pyfits.writeto(output_smooth_AV_ratiocorr_file, AVratiocorr, header=hdr)
+        pyfits.writeto(output_smooth_meanAV_ratiocorr_file, meanAVratiocorr, header=hdr)
+
+    # set minimum AV to use in plots
+
+    AVlim = 0.325
+
+    i_good = np.where(AV_img > AVlim)
+
+    ################################################
+    # Make plots
+
+    # set image region
+
+    region1 = [11.05, 41.32, 0.47, 0.45]   # brick 5 + SF ring
+    region2 = [11.29, 41.8,  0.55, 0.5]    # brick 9 + brick 15 region
+    region3 = [11.585, 42.1, 0.55, 0.5]
+    allregion = [11.33, 41.72, 0.92, 1.28]   # brick 5 + SF ring
+
+    # Redefine fits files, in case write_fits='False'
+
+    output_smooth_AV_file = output_smooth_AV_root + '.fits'
+    output_smooth_meanAV_file = output_smooth_meanAV_root + '.fits'
+
+    # image of smoothed AV
+
+    gc = aplpy.FITSFigure(output_smooth_AV_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=8, cmap='RdBu_r', 
+                       interpolation='nearest', aspect='auto')
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$A_V$')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+    filename = output_smooth_AV_root + '.region1' + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # image of meanAV smoothed
+
+    gc = aplpy.FITSFigure(output_smooth_meanAV_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=8, cmap='RdBu_r', 
+                       interpolation='nearest', aspect='auto')
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text('$A_V$')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+    filename = output_smooth_meanAV_root + '.region1' + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # image of smoothed AV ratio
+
+    ratiomax = 3.
+
+    gc = aplpy.FITSFigure(output_smooth_AV_ratio_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=ratiomax, cmap='spectral', 
+                       interpolation='nearest', aspect='auto')
+    # add AV level contours
+    print 'Adding contours from ',output_smooth_AV_file
+    gc.show_contour(output_smooth_AV_file, levels=[1.0], convention='wells',
+                    colors='black', linewidths=4)
+
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(r'$A_{V,gas} / \widetilde{A_V}$')
+
+    r = allregion
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region1'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region2
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region2'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region3
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region3'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # image of smoothed meanAV ratio
+
+    gc = aplpy.FITSFigure(output_smooth_meanAV_ratio_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=ratiomax, cmap='spectral', 
+                       interpolation='nearest', aspect='auto')
+    # add AV level contours
+    gc.show_contour(output_smooth_meanAV_file, levels=[1.0], convention='wells',
+                    colors='black', linewidths=4)
+
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(r'$A_{V,gas} / \langle A_V \rangle$')
+
+    r = allregion
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region1'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region2
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region2'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region3
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiomap.region3'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # image of smoothed AV corrected ratio
+
+    gc = aplpy.FITSFigure(output_smooth_AV_ratiocorr_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=2, cmap='seismic', 
+                       interpolation='nearest', aspect='auto')
+    # add AV level contours
+    gc.show_contour(output_smooth_AV_file, levels=[1.0], convention='wells',
+                    colors='black', linewidths=4)
+
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    if (ratiofix != 1): 
+        gc.colorbar.set_axis_label_text(r'$(A_{V,gas} / %4.2f) / (\widetilde{A_V} + %4.2f)$' % (ratiofix, biasfix))
+    else:
+        gc.colorbar.set_axis_label_text(r'$A_{V,gas} / (\widetilde{A_V} + %4.2f)$' % biasfix)
+
+
+    r = allregion
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region1'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region2
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region2'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region3
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region3'
+    filename = output_smooth_AV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    # image of smoothed meanAV ratio
+
+    gc = aplpy.FITSFigure(output_smooth_meanAV_ratiocorr_file, convention='wells', 
+                          figsize=(10.5,10.5),
+                          north='True')
+    gc.show_colorscale(vmin=0, vmax=2, cmap='seismic', 
+                       interpolation='nearest', aspect='auto')
+    # add AV level contours
+    gc.show_contour(output_smooth_meanAV_file, levels=[1.0], convention='wells',
+                    colors='black', linewidths=4)
+
+    gc.set_tick_labels_format(xformat='ddd.d', yformat='ddd.d')
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.1)
+    gc.grid.set_xspacing('tick')
+    gc.grid.set_yspacing('tick')
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    if (ratiofix != 1):
+        gc.colorbar.set_axis_label_text(r'$(A_{V,gas} / %4.2f) / (\langle A_V \rangle + %4.2f)$' % (ratiofixmean, biasfixmean))
+    else:
+        gc.colorbar.set_axis_label_text(r'$A_{V,gas} / (\langle A_V \rangle + %4.2f)$' % biasfixmean)
+
+    r = allregion
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region1
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region1'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region2
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region2'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    r = region3
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    exten = '.ratiocorrmap.region3'
+    filename = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving ', filename
+    gc.save(filename, adjust_bbox='True')
+
+    ################################################
+    # adopt larger fonts and set alpha value
+
+    print 'Increasing font size...'
+    
+    font = {'weight': '500',
+            'size': '18'}
+    plt.rc('font', **font)
+    
+    alpha = 1.0
+    scatteralpha = 0.3
+    scattersize = 3
+    greyval = '#B3B3B3'
+    plotfigsize = (10.0,10.0)
+
+    # Correlation plot AV  (ghost out low AV points)
+
+    plt.figure(11, figsize=plotfigsize)
+    plt.close()
+    plt.figure(11, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(AV_img[i_loAV], gasimg[i_loAV], ',', color=greyval, alpha=alpha)
+    #im = plt.plot(AV_img[i_hiAV], gasimg[i_hiAV], ',', color='black', alpha=alpha)
+    im = plt.scatter(AV_img[i_hiAV], gasimg[i_hiAV], c=lgnstar[i_hiAV], vmin=-1.2, vmax=np.log10(3.0),
+                     linewidth=0, s=scattersize, cmap='gist_ncar', alpha=scatteralpha)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label('Log$_{10} \Sigma_{stars}$  (arcsec$^{-2})$')
+    cb.draw_all()
+    plt.xlabel(r'$\widetilde{A_V}$')
+    plt.ylabel(r'$A_{V,gas}$')
+    plt.axis([0, 3.5, -0.25, 3.5])
+    
+    exten = '.correlation'
+    savefile = output_smooth_AV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # Correlation plot meanAV (ghost out low AV points)
+
+    plt.figure(12, figsize=plotfigsize)
+    plt.close()
+    plt.figure(12, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(meanAV_img[i_loAV], gasimg[i_loAV], ',', color=greyval, alpha=alpha)
+    #im = plt.plot(meanAV_img[i_hiAV], gasimg[i_hiAV], ',', color='black', alpha=alpha)
+    im = plt.scatter(meanAV_img[i_hiAV], gasimg[i_hiAV], c=lgnstar[i_hiAV], vmin=-1.2, vmax=np.log10(3.0),
+                     linewidth=0, s=scattersize, cmap='gist_ncar', alpha=scatteralpha)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label('Log$_{10} \Sigma_{stars}$  (arcsec$^{-2})$')
+    cb.draw_all()
+    plt.xlabel(r'$\langle A_V \rangle$')
+    plt.ylabel(r'$A_{V,gas}$')
+    plt.axis([0, 3.5, -0.25, 3.5])
+    
+    exten = '.correlation'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # corrected Correlation plot AV  (ghost out low AV points)
+
+    plt.figure(21, figsize=plotfigsize)
+    plt.close()
+    plt.figure(21, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(AV_img[i_loAV] + biasfix, gasimg[i_loAV] / ratiofix, ',', color=greyval, alpha=alpha)
+    #im = plt.plot(AV_img[i_hiAV] + biasfix, gasimg[i_hiAV] / ratiofix, ',', color='black', alpha=alpha)
+    im = plt.scatter(AV_img[i_hiAV] + biasfix, gasimg[i_hiAV] / ratiofix, c=lgnstar[i_hiAV], vmin=-1.2, vmax=np.log10(3.0),
+                     linewidth=0, s=scattersize, cmap='gist_ncar', alpha=scatteralpha)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label('Log$_{10} \Sigma_{stars}$  (arcsec$^{-2})$')
+    cb.draw_all()
+    plt.plot([-1,10], [-1,10], color='red', linewidth=4)
+    plt.xlabel(r'$\widetilde{A_V} + %4.2f$' % biasfix)
+    if (ratiofix != 1):
+        plt.ylabel(r'$A_{V,gas} / %4.2f$' % ratiofix)
+    else:
+        plt.ylabel(r'$A_{V,gas}$')
+    plt.axis([-0.25, 3.5, -0.25, 3.5])
+    
+    exten = '.correlationcorr'
+    savefile = output_smooth_AV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # corrected Correlation plot AV  (ghost out low AV points)
+
+    plt.figure(22, figsize=plotfigsize)
+    plt.close()
+    plt.figure(22, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(meanAV_img[i_loAV] + biasfixmean, gasimg[i_loAV] / ratiofixmean, ',', color=greyval, alpha=alpha)
+    #im = plt.plot(meanAV_img[i_hiAV] + biasfixmean, gasimg[i_hiAV] / ratiofixmean, ',', color='black', alpha=alpha)
+    im = plt.scatter(meanAV_img[i_hiAV] + biasfixmean, gasimg[i_hiAV] / ratiofixmean, c=lgnstar[i_hiAV], vmin=-1.2, vmax=np.log10(3.0),
+                     linewidth=0, s=scattersize, cmap='gist_ncar', alpha=scatteralpha)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label('Log$_{10} \Sigma_{stars}$  (arcsec$^{-2})$')
+    cb.draw_all()
+    plt.plot([-1,10], [-1,10], color='red', linewidth=4)
+    plt.xlabel(r'$\langle A_V \rangle + %4.2f$' % biasfixmean)
+    if (ratiofixmean != 1):
+        plt.ylabel(r'$A_{V,gas} / %4.2f$' % ratiofixmean)
+    else:
+       plt.ylabel(r'$A_{V,gas}$')
+    plt.axis([-0.25, 3.5, -0.25, 3.5])
+    
+    exten = '.correlationcorr'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # Ratio plot AV  (ghost out low AV points)
+
+    AVvec = np.linspace(0.001,10,100)
+    ratiovec = ratiofix * (1.0 + biasfix/AVvec)
+
+    plt.figure(13, figsize=plotfigsize)
+    plt.close()
+    plt.figure(13, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(AV_img[i_loAV], gasimg[i_loAV] / AV_img[i_loAV], ',', color=greyval, alpha=alpha)
+    #im = plt.plot(AV_img[i_hiAV], gasimg[i_hiAV] / AV_img[i_hiAV], ',', color='black', alpha=alpha)
+    im = plt.scatter(AV_img[i_hiAV], gasimg[i_hiAV] / AV_img[i_hiAV], c=lgnstar[i_hiAV], vmin=-1.2, vmax=np.log10(3.0),
+                     linewidth=0, s=scattersize, cmap='gist_ncar', alpha=scatteralpha)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label('Log$_{10} \Sigma_{stars}$  (arcsec$^{-2})$')
+    cb.draw_all()
+    plt.plot(AVvec, ratiovec, color='red', linewidth=4)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$A_{V,gas}  /  \widetilde{A_V}$')
+    plt.axis([0, 3.5, 0, 7])
+    
+    exten = '.ratio'
+    savefile = output_smooth_AV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # Ratio plot meanAV  (ghost out low AV points)
+
+    ratiovec = ratiofixmean * (1.0 + biasfixmean/AVvec)
+
+    plt.figure(14, figsize=plotfigsize)
+    plt.close()
+    plt.figure(14, figsize=plotfigsize)
+    plt.clf()
+    im = plt.plot(meanAV_img[i_loAV], gasimg[i_loAV] / meanAV_img[i_loAV], ',', 
+                  color=greyval, alpha=alpha)
+    #im = plt.plot(meanAV_img[i_hiAV], gasimg[i_hiAV] / meanAV_img[i_hiAV], ',', 
+    #              color='black', alpha=alpha)
+    im = plt.scatter(meanAV_img[i_hiAV], gasimg[i_hiAV] / meanAV_img[i_hiAV], c=lgnstar[i_hiAV], vmin=-1.2, vmax=np.log10(3.0),
+                     linewidth=0, s=scattersize, cmap='gist_ncar', alpha=scatteralpha)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label('Log$_{10} \Sigma_{stars}$  (arcsec$^{-2})$')
+    cb.draw_all()
+    plt.plot(AVvec, ratiovec, color='red', linewidth=4)
+    plt.xlabel(r'$\langle A_V \rangle$')
+    plt.ylabel(r'$A_{V,gas}  /  \langle A_V \rangle$')
+    plt.axis([0, 3.5, 0, 7])
+    
+    exten = '.ratio'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # restore font size
+
+    print 'Restoring original font defaults...'
+    plt.rcdefaults()
+
+    return
+
+

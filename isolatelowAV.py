@@ -201,7 +201,8 @@ def isolate_low_AV(filename = 'ir-sf-b17-v8-st.fits', datadir = '../../Data/',
     
     return c[ikeep_narrow], m[ikeep_narrow], ikeep_narrow, ra[ikeep_narrow], dec[ikeep_narrow], rnarrow, cstd_narrow, cm_narrow, cmean_narrow, nstar_narrow, cm, cmean, cstd, nstar, rabins, decbins, rarray, decarray, raarray
 
-def get_major_axis(ra, dec, m31ra=10.6847929, m31dec = 41.2690650, pa=38.5, incl=74.):
+
+def get_major_axis(ra, dec, m31ra=10.6847929, m31dec = 41.2690650, pa=38.5, incl=74., return_theta=False):
 
     # conversion from degrees to radians
     radeg  = np.pi / 180.
@@ -233,12 +234,25 @@ def get_major_axis(ra, dec, m31ra=10.6847929, m31dec = 41.2690650, pa=38.5, incl
     #majdeg = raoff * np.sin(m31pa) + decoff * np.cos(m31pa)   
     r = np.sqrt((decoff * math.cos(m31pa) + raoff * math.sin(m31pa))**2 +
                 (decoff * math.sin(m31pa) - raoff * math.cos(m31pa))**2 / (1.0 - ecc**2))
-    r = np.sqrt((decoff * math.cos(m31pa) + raoff * math.sin(m31pa))**2 +
-                (decoff * math.sin(m31pa) - raoff * math.cos(m31pa))**2 / (1.0 - ecc**2))
-    
-    return r
 
-def test_major_axis(filename = '../Results/FirstRun/ir-sf-b02-v8-st.npz'):
+    if (return_theta == True):
+
+        y = decoff * math.cos(m31pa) + raoff * math.sin(m31pa)
+        x = decoff * math.sin(m31pa) - raoff * math.cos(m31pa)
+
+        theta = np.arccos(np.sqrt(1.0 - (y / r)**2))
+
+        i_negx = np.where(x < 0)
+        theta[i_negx] = (np.pi ) - theta[i_negx]
+
+        return r, theta
+
+    else:
+
+        return r
+
+
+def test_major_axis(filename = '../Results/FourthRun/ir-sf-b17-v8-st.npz', hz_over_hr=0.2):
 
     d = np.load(filename)
 
@@ -254,29 +268,51 @@ def test_major_axis(filename = '../Results/FirstRun/ir-sf-b02-v8-st.npz'):
     r_brickcorner = [min(ra_b), min(ra_b), max(ra_b), max(ra_b), min(ra_b)]
     d_brickcorner = [min(dec_b), max(dec_b), max(dec_b), min(dec_b), min(dec_b)]
 
-    r_g = get_major_axis(rr_g, dd_g)
-    r_b = get_major_axis(rr_b, dd_b)
+    r_g, t_g = get_major_axis(rr_g, dd_g, return_theta=True)
+    r_b, t_b = get_major_axis(rr_b, dd_b, return_theta=True)
+
+    incl = 74.
+    f_g = 0.5 * (1 - np.tan(incl * np.pi / 180.) * np.cos(t_g) * hz_over_hr)
+
+    print rr_g.shape
+    print rr_g[:,::-1].shape
+    print ra_g.shape
+    print dec_g.shape
+
     
+    #----------------------
     plt.figure(1)
     plt.clf()
 
-    plt.subplot(1,3,1)
+    plt.subplot(2,2,1)
     im = plt.imshow(rr_g[:,::-1], origin='lower', extent=rangevec_g, aspect='auto')
     plt.colorbar(im)
     plt.title('RA')
     plt.suptitle(filename)
 
-    plt.subplot(1,3,2)
+    plt.subplot(2,2,2)
     im = plt.imshow(dd_g[:,::-1], origin='lower', extent=rangevec_g, aspect='auto')
     plt.colorbar(im)
     plt.title('Dec')
 
-    plt.subplot(1,3,3)
+    plt.subplot(2,2,3)
+    #im = plt.imshow(r_g[:,::-1], origin='lower', extent=rangevec_g, aspect='auto')
     im = plt.imshow(r_g[:,::-1], origin='lower', extent=rangevec_g, aspect='auto')
+    plt.axis(rangevec_g)
     plt.colorbar(im)
     plt.title('Major Axis')
     im = plt.plot(r_brickcorner, d_brickcorner, color='black')
     
+    plt.subplot(2,2,4)
+    #im = plt.imshow(np.cos(t_g[:,::-1]), origin='lower', extent=rangevec_g, aspect='auto')
+    #plt.title(r'cos($\theta$)')
+    im = plt.imshow(f_g[:,::-1], origin='lower', extent=rangevec_g, aspect='auto', vmin=0, vmax=1)
+    plt.title(r'$f_{red}$')
+    plt.axis(rangevec_g)
+    plt.colorbar(im)
+    im = plt.plot(r_brickcorner, d_brickcorner, color='black')
+    
+    #----------------------
     plt.figure(2)
     plt.clf()
 
