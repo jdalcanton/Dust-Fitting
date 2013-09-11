@@ -187,72 +187,6 @@ def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'],
     return bestfit_values, percentile_values, quality_values, bad_pix_mask, bestfit_values_clean
 
 
-def plot_f_red_theory():
-
-    xmax = 5.
-    x = np.linspace(-xmax, xmax, 1000)
-    sech_func = stats.hypsecant()
-    
-    beta_vec = np.linspace(0,1,5)
-    offset_vec = 0.0*beta_vec
-
-    plt.figure(1, figsize=(6,9))
-    plt.clf()
-
-    for i, beta in enumerate(beta_vec):
-
-        if (beta != 0): 
-
-            L = (2.0**beta * (sech_func.pdf(x / beta))**beta)
-
-        else:
-
-            L = np.exp(-abs(x))
-
-        Lint = np.cumsum(L)
-
-        # normalize...
-        L = L / (Lint[-1] * (x[1] - x[0]))
-        Lint = Lint / Lint[-1]
-
-        # rescale to common half-light scale height
-        Linterp = interp.interp1d(Lint,x)
-        x0 = Linterp([0.75])[0]
-
-        # renormalize PDF
-        L = L * x0
-
-        plt.subplot(2,1,1)
-        plt.plot(x / x0, L)
-        plt.axis([-3,3,0,0.4])
-
-        plt.subplot(2,1,2)
-        plt.plot(x / x0, Lint)
-        plt.axis([-3,3,0,1])
-
-        Linterp = interp.interp1d(Lint,x/x0)
-        refx = 0.2
-        x1 = Linterp([1-refx])[0]
-        offset_vec[i] = x1
-        print 'Beta: ', beta,'  X-rescale: ',x0, '  Reference Fraction: ', refx, ' z / z_{1/2}: ', x1
-        plt.plot([-3,3], [refx,refx], color='black', alpha=0.3)
-        plt.plot([-3,3], [1-refx,1-refx], color='black', alpha=0.3)
-
-        plt.xlabel('$z / z_{1/2}$')
-
-            
-    # make plot of tipping angle for various r/z_1/2
-
-    r_over_z = np.linspace(2,20,1000)
-
-    theta = (offset_vec.mean() / r_over_z) * (180. / np.pi)
-
-    plt.figure(2)
-    plt.clf()
-    
-    plt.plot(r_over_z, theta, color='black')
-    plt.xlabel('$r / z_{1/2}$')
-    plt.ylabel(r'$ \theta $')
 
 def plot_errors(dat, indices='', fignum='', clearfig=False, *args, **kwargs):
 
@@ -2550,38 +2484,6 @@ def compare_draine_dust(AV, ra_bins, dec_bins):
 
     return img, AV_img, i_fit
 
-def make_model_frac_red(inclination = 70., hz_over_hr = 0.2):
-
-    xvec = np.linspace(-10,10,100)
-    yvec = np.linspace(-10,10,100)
-    x, y = np.meshgrid(xvec, yvec)
-    
-    # conversion from degrees to radians
-    radeg  = np.pi / 180.
-    incl = inclination * radeg
-    b_over_a = math.cos(incl)
-    ecc = math.sqrt(1. - (b_over_a)**2.)
-    #pa_deg = 43.5
-    pa_deg = 0.0
-    pa = pa_deg * radeg
-
-    # get major axis length at each position
-    r = np.sqrt((x * math.cos(pa) + y * math.sin(pa))**2 +
-                (x * math.sin(pa) - y * math.cos(pa))**2 / (1.0 - ecc**2))
-    
-    x0 = x / math.cos(incl)
-
-    # calculate reddened fraction
-    f = (1 + np.sign(x) * hz_over_hr * math.tan(incl) * np.cos(theta)) / 2.0
-
-    # plot it...
-    plt.figure(1)
-    plt.clf()
-    im = plt.imshow(f,vmin=0, vmax=1, cmap='seismic',extent=[-10,10,-10,10])
-    plt.colorbar(im)
-
-    return f
-
 def plot_all_low_AV_rgb_maglims():
 
     imgfileroot = '../Unreddened/low_AV_CMD_r.'
@@ -4136,6 +4038,61 @@ def fix_epoch_in_gas_header_and_flatten():
 
     return
 
+def get_model_frac_red(ragrid, decgrid, 
+                       m31ra=10.6847929, m31dec=41.2690650, 
+                       pa=35.0, inclination=78.5, 
+                       hz_over_hr=0.15,
+                       make_plot=False):
+
+    # conversion from degrees to radians
+    radeg  = np.pi / 180.
+    incl = inclination * radeg
+
+    # get major axis length at each position
+
+    r, theta = iAV.get_major_axis(ragrid, decgrid, 
+                                  m31ra=m31ra, m31dec=m31dec,
+                                  pa=pa, incl=inclination,
+                                  return_theta=True)
+
+    f = 1.0 - 0.5 * (1.0 - hz_over_hr * math.tan(incl) * np.cos(theta))
+    
+    # plot it, if requested
+
+    if (make_plot):
+        # make nicer output
+        print 'Increasing font size...'
+        font = {'weight': '500',
+                'size': '18'}
+        plt.rc('font', **font)
+        
+        rangevec_g = [np.max(ragrid), np.min(ragrid), np.min(decgrid), np.max(decgrid)]
+        plt.figure(1)
+        plt.close()
+        plt.figure(1, figsize=(12,10))
+        im = plt.imshow(f[:,::-1], origin='lower', extent=rangevec_g, aspect='auto', 
+                        vmin=0.1, vmax=0.9)
+        plt.title(r'$f_{red}$')
+        #plt.axis([12., 10.5, 41.1, 42.4])
+        plt.axis(rangevec_g)
+        color_bar = plt.colorbar(im)
+        color_bar.ax.set_aspect(50.)
+        color_bar.set_label('$f_{red}$')
+        color_bar.draw_all()
+        plt.xlabel('RA')
+        plt.ylabel('Dec')
+        plt.annotate('$h_z / h_r > %4.2f$' % hz_over_hr,
+                     xy=(0.95, 0.90), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+        plt.draw()
+        # restore font size
+        print 'Restoring original font defaults...'
+        plt.rcdefaults()
+
+    # return reddened fraction
+    
+    return f
+
 def plot_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2, 
                             imgexten='.png', plot_error_distribution=False):
 
@@ -4266,6 +4223,278 @@ def plot_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     plt.rcdefaults()
 
     return
+
+def fit_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2, 
+                            imgexten='.png', r_range=[0, 1.4]):
+
+    resultsdir = '../Results/'
+    fileroot = 'merged_interleave'
+    AVfile = resultsdir + fileroot + '.AV.fits'
+    AVerrfile = resultsdir + fileroot + '.AVerr.fits'
+    ffile = resultsdir + fileroot + '.fred.fits'
+    ferrfile = resultsdir + fileroot + '.ferr.fits'
+
+    output_fred_datamap_file = resultsdir + fileroot + '.fredfitdatamap' + imgexten
+    output_fred_modelmap_file = resultsdir + fileroot + '.fredfitmodelmap' + imgexten
+    output_fred_modeldiffmap_file = resultsdir + fileroot + '.fredfitmodeldiffmap' + imgexten
+    output_fred_modeldiffradiusplot_file = resultsdir + fileroot + '.fredfitmodeldiffradiusplot' + imgexten
+    output_fred_modeldiffplot_file = resultsdir + fileroot + '.fredfitmodeldiffplot' + imgexten
+    
+    hdulist = fits.open(AVfile)
+    AV = hdulist[0].data
+    hdr = hdulist[0].header
+    hdulist.close()
+
+    hdulist = fits.open(AVerrfile)
+    AVerr = hdulist[0].data
+    hdulist.close()
+
+    hdulist = fits.open(ffile)
+    f = hdulist[0].data
+    hdulist.close()
+
+    hdulist = fits.open(ferrfile)
+    ferr = hdulist[0].data
+    hdulist.close()
+    
+    # calculate fractional error
+
+    i_good = np.where(AV > 0)
+    i_bad =  np.where(AV <= 0)
+
+    AVfracerr = AVerr / AV
+    AVfracerr[i_bad] = 0
+
+    # keep only high extinction, high reliability points
+
+    i_keep = np.where((AV > AVthresh) & (AVfracerr < AVfracerrthresh) & (ferr < ferrthresh))
+    i_ra = i_keep[1]
+    i_dec = i_keep[0]
+    f = f[i_keep]
+    ferr = ferr[i_keep]
+
+    # set up WCS and get ra, dec of good pixels
+    
+    w = wcs.WCS(hdr)
+    ra_dec_coords = w.wcs_pix2world([[i_ra[i], i_dec[i]] 
+                                     for i in range(len(i_ra))], 1)
+    ra = ra_dec_coords[:,0]
+    dec = ra_dec_coords[:,1]
+    print ra_dec_coords.shape
+
+    # Further restrict to limited radial range
+
+    r = iAV.get_major_axis(ra, dec)
+    i_keep = np.where((r_range[0] <= r) & (r < r_range[1]))
+    ra  =  ra[i_keep]
+    dec = dec[i_keep]
+    f   =   f[i_keep]
+    ferr = ferr[i_keep]
+    print len(f), ' Points being fit.'
+
+    r, theta = iAV.get_major_axis(ra, dec, return_theta=True)
+
+    # define center of bulge
+    m31ra  = 10.6847929
+    m31dec = 41.2690650    
+
+    # define grid of inclination, hz_over_hr, and position angle
+
+    nincl = 40. + 1.
+    npa = 20. + 1.
+    nhzhr = 30. + 1.
+    inclvec = np.linspace(65.0, 85.0, nincl)
+    pavec = np.linspace(25., 45., npa)
+    hzhrvec = np.linspace(0.10, 0.40, nhzhr)
+
+    # set up weights to fit more evenly across all f values
+
+    weight = f    # increase high points
+    weight = 1.0 + 0.0*f  # uniform
+    nbins = 10
+    hist, bins = np.histogram(f, bins=nbins)
+    i_f = np.digitize(f, bins,right=True)
+    weight = 1.0 / hist[i_f - 1]
+
+    # loop through grid, calculating chi^2
+
+    chi2grid = np.zeros((nincl, npa, nhzhr))
+    ndat = len(f)
+    print 'Calculating Chi2....'
+    for i_incl, incl in enumerate(inclvec):
+        for i_pa, pa in enumerate(pavec):
+            for i_hzhr, hzhr in enumerate(hzhrvec):
+
+                fmodel = get_model_frac_red(ra, dec, 
+                                            m31ra=m31ra, m31dec=m31dec, 
+                                            pa=pa, inclination=incl, 
+                                            hz_over_hr=hzhr,
+                                            make_plot=False)
+                chi2 = ((fmodel - f) / ferr)**2 
+                chi2grid[i_incl, i_pa, i_hzhr] = np.sum(weight * chi2) / np.sum(weight)
+        plt.figure(4)
+        plt.clf()
+        plt.plot(dec, fmodel - f, 'o')
+        plt.draw()
+
+    minchi2 = np.min(chi2grid)
+    i_minchi2 = np.where(chi2grid == minchi2)  # not pythonic, but oh well.
+    print i_minchi2
+    best_incl = inclvec[i_minchi2[0][0]]
+    best_pa   =   pavec[i_minchi2[1][0]]
+    best_hzhr = hzhrvec[i_minchi2[2][0]]
+    
+    print 'Best Fit for f_red distribution: ', best_incl, best_pa, best_hzhr
+
+    fmodel = get_model_frac_red(ra, dec, 
+                                m31ra=m31ra, m31dec=m31dec, 
+                                pa=best_pa, inclination=best_incl, 
+                                hz_over_hr=best_hzhr,
+                                make_plot=False)
+
+    # make nicer output
+    print 'Increasing font size...'
+    font = {'weight': '500',
+            'size': '18'}
+    plt.rc('font', **font)
+
+    #
+    plt.figure(1)
+    plt.close()
+    plt.figure(1, figsize=(12,10))
+    im = plt.scatter(ra, dec, c=f, linewidth=0, s=4,
+                     vmin=0.1, vmax=0.9)
+    color_bar = plt.colorbar(im)
+    color_bar.ax.set_aspect(50.)
+    color_bar.set_label('$f_{red} (Observed)$')
+    color_bar.draw_all()
+    plt.axis([12., 10.5, 41.1, 42.4])
+    plt.xlabel('RA')
+    plt.ylabel('Dec')
+    plt.annotate('$\widetilde{A_V} > %4.2f$' % AVthresh,
+                     xy=(0.95, 0.90), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.annotate('$\Delta f_{red} < %3.1f$' % ferrthresh,
+                     xy=(0.95, 0.85), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.draw()
+    print 'Saving map to ', output_fred_datamap_file
+    plt.savefig(output_fred_datamap_file, bbox_inches=0)
+
+    #
+    plt.figure(2)
+    plt.close()
+    plt.figure(2, figsize=(12,10))
+    im = plt.scatter(ra, dec, c=fmodel, linewidth=0, s=4,
+                     vmin=0.1, vmax=0.9)
+    color_bar = plt.colorbar(im)
+    color_bar.ax.set_aspect(50.)
+    color_bar.set_label('$f_{red} (Model)$')
+    color_bar.draw_all()
+    plt.axis([12., 10.5, 41.1, 42.4])
+    plt.xlabel('RA')
+    plt.ylabel('Dec')
+    plt.annotate('$PA = %3.1f^\circ$' % best_pa,
+                     xy=(0.95, 0.90), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.annotate('$Inclination = %3.1f^\circ$' % best_incl,
+                     xy=(0.95, 0.85), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.annotate('$h_z / h_r = %4.2f$' % best_hzhr,
+                     xy=(0.95, 0.80), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.draw()
+    print 'Saving map to ', output_fred_modelmap_file
+    plt.savefig(output_fred_modelmap_file, bbox_inches=0)
+
+
+    #
+    plt.figure(3)
+    plt.close()
+    plt.figure(3, figsize=(12,10))
+    im = plt.scatter(ra, dec, c=(f - fmodel), linewidth=0, s=4,
+                     vmin=-0.2, vmax=0.2, cmap='seismic')
+    color_bar = plt.colorbar(im)
+    color_bar.ax.set_aspect(50.)
+    color_bar.set_label('$\Delta f_{red} (Data - Model)$')
+    color_bar.draw_all()
+    plt.axis([12., 10.5, 41.1, 42.4])
+    plt.xlabel('RA')
+    plt.ylabel('Dec')
+    plt.annotate('$PA = %3.1f^\circ$' % best_pa,
+                     xy=(0.95, 0.90), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.annotate('$Inclination = %3.1f^\circ$' % best_incl,
+                     xy=(0.95, 0.85), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.annotate('$h_z / h_r = %4.2f$' % best_hzhr,
+                     xy=(0.95, 0.80), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.draw()
+    print 'Saving map to ', output_fred_modeldiffmap_file
+    plt.savefig(output_fred_modeldiffmap_file, bbox_inches=0)
+
+    #
+    plt.figure(4)
+    plt.close()
+    plt.figure(4, figsize=(12,10))
+    plt.plot([0, 1.5],[0, 0], color='black')
+    im = plt.scatter(r, f-fmodel, c=f, linewidth=0, s=4,
+                     vmin=0.1, vmax=0.9)
+    color_bar = plt.colorbar(im)
+    color_bar.ax.set_aspect(50.)
+    color_bar.set_label('$f_{red}$')
+    color_bar.draw_all()
+    plt.axis([0.3, 1.3, -0.35, 0.35])
+    plt.xlabel('Radius (degrees)')
+    plt.ylabel('$\Delta f_{red} (Data - Model)$')
+    plt.annotate('$PA = %3.1f^\circ$' % best_pa,
+                     xy=(0.95, 0.90), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.annotate('$Inclination = %3.1f^\circ$' % best_incl,
+                     xy=(0.95, 0.85), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.annotate('$h_z / h_r = %4.2f$' % best_hzhr,
+                     xy=(0.95, 0.80), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.draw()
+    print 'Saving map to ', output_fred_modeldiffradiusplot_file
+    plt.savefig(output_fred_modeldiffradiusplot_file, bbox_inches=0)
+
+    #
+    plt.figure(5)
+    plt.close()
+    plt.figure(5, figsize=(12,10))
+    plt.plot([0, 1],[0, 0], color='black')
+    im = plt.scatter(f, f-fmodel, c=r, linewidth=0, s=4,
+                     vmin=0.4, vmax=1.3)
+    color_bar = plt.colorbar(im)
+    color_bar.ax.set_aspect(50.)
+    color_bar.set_label('Radius (Degrees)')
+    color_bar.draw_all()
+    plt.axis([0, 1, -0.25, 0.25])
+    plt.xlabel('$f_{red}$')
+    plt.ylabel('$\Delta f_{red} (Data - Model)$')
+    plt.annotate('$PA = %3.1f^\circ$' % best_pa,
+                     xy=(0.95, 0.90), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.annotate('$Inclination = %3.1f^\circ$' % best_incl,
+                     xy=(0.95, 0.85), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.annotate('$h_z / h_r = %4.2f$' % best_hzhr,
+                     xy=(0.95, 0.80), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    plt.draw()
+    print 'Saving map to ', output_fred_modeldiffplot_file
+    plt.savefig(output_fred_modeldiffplot_file, bbox_inches=0)
+
+
+
+    # restore font size
+    print 'Restoring original font defaults...'
+    plt.rcdefaults()
+
+    return chi2grid, f, fmodel, ra, dec
 
 def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgexten='.png'):
 
