@@ -12,6 +12,7 @@ import time
 import ezfig  # morgan's plotting code
 import read_brick_data as rbd
 import isolatelowAV as iAV
+import analysis as analysis
 from scipy import ndimage
 from scipy.stats import norm
 from scipy.ndimage import filters as filt
@@ -20,6 +21,8 @@ import string
 import os.path as op
 import random as rnd
 import numpy as np
+from astropy.io import fits
+from astropy import wcs
 
 # Principle: "rotate" to frame where all "colors" are along reddening
 # vector. Rotate the -data- into this frame, once. Rotate the original
@@ -462,7 +465,7 @@ def make_data_mask(fg_cmd, cedges, medges, m1range, m2range, clim, useq=0):
 
 def makefakecmd(fg_cmd, cvec, mvec, AVparam, floorfrac=0.0, 
                 mask = 1.0, SHOWPLOT=True, 
-                noise_model=0.0, noise_frac=0.0, frac_red_mean=0.5):
+                noise_model=0.0, noise_frac=0.0, frac_red_mean=0.5, print_fred=False):
     """
     fg_cmd, cvec, mvec = 2-d binned CMD of lowreddening stars, binned
             in color c & DEREDDENED magnitude m' =
@@ -491,6 +494,8 @@ def makefakecmd(fg_cmd, cvec, mvec, AVparam, floorfrac=0.0,
     #fracred = AVparam[0]
     alpha = log(0.5) / log(frac_red_mean)
     fracred = (exp(AVparam[0]) / (1. + exp(AVparam[0])))**(1./alpha) # x = ln(f/(1-f))
+    if (print_fred):
+        print 'In makefakecmd: f_red = ', fracred
     medianAV = AVparam[1]
     #stddev = AVparam[2] * medianAV
     #sigma_squared = log((1. + sqrt(1. + 4. * (stddev/medianAV)**2)) / 2.)
@@ -617,7 +622,8 @@ def makefakecmd_AVparamsonly(param):
                         (0.33669 - 0.20443)], 
                        floorfrac=floorfrac_value, 
                        mask=color_qmag_datamask, SHOWPLOT=False,
-                       noise_model = noise_model)
+                       noise_model = noise_model, 
+                       frac_red_mean = frac_red_mean)
 
 def cmdlikelihoodfunc(param, i_star_color, i_star_magnitude):
     """
@@ -879,10 +885,24 @@ def get_ra_dec_bin(i_ra=60, i_dec=20):
 
 
 
+class lnpriorobj(object):
+
+    def __init__(self, f_mean):
+        self.f_mean = f_mean
+
+    def __call__(self, param, **kwargs):
+
+        return ln_priors_function(param, f_mean = self.f_mean, **kwargs)
+
+    def map_call(self, args):
+
+        return self(*args)
+
+
 class likelihoodobj(object):
 
     def __init__(self, foreground_cmd, noise_model, datamask, color_boundary, mag_boundary, 
-                 noise_frac, floorfrac_value):
+                 noise_frac, floorfrac_value, f_mean):
         self.foreground_cmd = foreground_cmd
         self.noise_model = noise_model
         self.datamask = datamask
@@ -890,9 +910,11 @@ class likelihoodobj(object):
         self.mag_boundary = mag_boundary
         self.noise_frac = noise_frac
         self.floorfrac_value = floorfrac_value
+        self.f_mean = f_mean
 
     def __call__(self, param, i_star_color, i_star_magnitude):
 
+        ln_priors = lnpriorobj(self.f_mean)
         lnp = ln_priors(param)
 
         if (lnp == -Inf):     # parameters out of range
@@ -906,13 +928,14 @@ class likelihoodobj(object):
                           floorfrac=self.floorfrac_value, 
                           mask=self.datamask, SHOWPLOT=False,
                           noise_model = self.noise_model,
-                          noise_frac = self.noise_frac)
+                          noise_frac = self.noise_frac,
+                          frac_red_mean = self.f_mean)
     
         # calculate log likelihood
 
         pval = img[i_star_magnitude, i_star_color]
 
-        lnlikelihood =  (log(pval[where(pval > 0)])).sum()
+        lnlikelihood = (log(pval[where(pval > 0)])).sum()
 
         return lnp + lnlikelihood
 
@@ -920,9 +943,82 @@ class likelihoodobj(object):
 
         return self(*args)
 
+def test_run_one_brick(datadir='../../Data/', results_extension = '', AV_fitsfile=''):
+    """
+    Test code using single pixel
+    """
+
+    #datadir = '../../Data/'
+    #results_extension = ''
+    nwalkers = 50
+    nsamp = 15
+    nburn = 150
+    #nburn = 300
+
+    fileroot = 'ir-sf-b15-v8-st'
+    d_arcsec = 6.64515
+    grab_ira_idec = [7, 59]    # high extinction, high f_red
+    grab_ira_idec = [45, 63]    # high extinction, moderate f_red
+    grab_ira_idec = [45, 60]    # high extinction, moderate f_red
+    grab_ira_idec = [49, 56]    # high extinction, moderate f_red
+    grab_ira_idec = [16, 18]    # high extinction, loweish f_red
+    grab_ira_idec = [59, 35]    # lowish extinction, loweish f_red
+    grab_ira_idec = [61, 42]    # lowish extinction, loweish f_red
+    grab_ira_idec = [61, 59]    # very high extinction, loweish f_red
+    grab_ira_idec = [95, 12]    # low extinction, loweish f_red
+    grab_ira_idec = [95, 13]    # low extinction, loweish f_red
+
+    fileroot = 'ir-sf-b16-v8-st'
+    d_arcsec = 6.64515
+    grab_ira_idec = [90, 28]    # low extinction, low f_red
+    grab_ira_idec = [90, 29]    # low extinction, low f_red
+
+    fileroot = 'ir-sf-b17-v8-st'
+    d_arcsec = 6.64515
+    grab_ira_idec = [10, 76]    # moderate extinction, high f_red, low N
+    grab_ira_idec = [12, 62]    # moderate extinction, high f_red
+    grab_ira_idec = [11, 76]    # moderate extinction, high f_red
+    grab_ira_idec = [13, 74]    # moderate extinction, high f_red
+    grab_ira_idec = [29, 67]    # moderate extinction, high f_red
+    grab_ira_idec = [45, 71]    # moderate extinction, high f_red
+    grab_ira_idec = [45, 70]    # moderate extinction, high f_red
+
+    fileroot = 'ir-sf-b16-v8-st'
+    d_arcsec = 6.64515
+    grab_ira_idec = [103, 52]    # moderate extinction, high f_red, low N
+    grab_ira_idec = [104, 1]    # moderate extinction, high f_red, low N
+    grab_ira_idec = [104, 24]    # moderate extinction, high f_red, low N
+    grab_ira_idec = [110, 19]    # big outlier
+    grab_ira_idec = [110, 42]    # modest outlier
+    grab_ira_idec = [114, 44]    # modest outlier
+
+    fileroot = 'ir-sf-b02-v8-st'
+    d_arcsec = 25.0
+    grab_ira_idec = [25, 0]    # high sigma in low res
+    grab_ira_idec = [28, 4]    # high sigma in low res
+
+    fileroot = 'ir-sf-b12-v8-st'
+    d_arcsec = 25.0
+    grab_ira_idec = [30, 15]    # high sigma in low res
+
+    fileroot = 'ir-sf-b06-v8-st'
+    d_arcsec = 25.0
+    grab_ira_idec = [5, 12]    # high sigma in low res
+    grab_ira_idec = [17, 18]    # high sigma in low res
+    grab_ira_idec = [9, 17]    # high sigma in low res
+
+    d_derived, percentile_derived, samp, d, bestfit, sigmavec, i_c, i_q, fg_cmd, fake_cmd \
+        = run_one_brick(fileroot, datadir=datadir, results_extension=results_extension, 
+                        deltapixorig = [0.025,0.2], d_arcsec = d_arcsec, d_pix_offset=[0,0],
+                        showplot='', nwalkers=nwalkers, nsamp=nsamp, nburn=nburn, 
+                        grab_ira_idec=grab_ira_idec, AV_fitsfile=AV_fitsfile)
+
+    return
+
 def run_one_brick(fileroot, datadir='../../Data/', results_extension='', 
                   deltapixorig = [0.025,0.2], d_arcsec = 6.64515, d_pix_offset=[0,0],
-                  showplot='', nwalkers=50, nsamp=15, nburn=150, grab_ira_idec=[]):
+                  showplot='', nwalkers=50, nsamp=15, nburn=150, grab_ira_idec=[],
+                  AV_fitsfile=''):
     """
     For a given fits file, do all the necessary prep for running fits
     - read file
@@ -939,9 +1035,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     crange    = [0.3,3.5]        # range of colors to use in CMD fitting
     #maglimoff = [0.0, 0.25]      # shift 50% magnitude limits this much brighter
     maglimoff = [0.0, 0.5]      # shift 50% magnitude limits this much brighter
-    #deltapixorig = [0.025,0.2]  # pixel_size in CMD color, magnitude
     mfitrange = [18.7,21.3]      # range for doing selection for "narrow" RGB
-    #d_arcsec = 6.64515           # resolution of ra-dec grid for result (6.64515 = 25 pc at 776 kpc)
     floorfrac_value = 0.05       # define fraction of uniform "noise" to include in data model
     dr = 0.025                   # radius interval within which to do analyses
     r_interval_range = [0.15, 1.8] # range over which to calculate foreground CMDs (clips bulge)
@@ -951,9 +1045,16 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     masksig = [2.5, 3.0]         # limits of data mask for clipping noise from foreground CMD
     noisemasksig = [4.5,3.5]     # limits of noise mask for clipping foreground CMD from noise
     n_fit_min = 15
-    #frac_red_mean = 0.4
     frac_red_mean = 0.2          # matters at low AV, where filling factor is small
-    param_init = [0.05, 0.35, 0.4]  # starting at x=0 locks in, because random*0 = 0
+    f_red_model_pa = 37.0
+    f_red_model_incl = 78.0
+    f_red_model_hz_over_hr = 0.15             # needed to calculate model of f_red
+    xinitval = 0.05
+    AVinitval = 0.35
+    sigmainitval = 0.4
+    param_init = [xinitval, AVinitval, sigmainitval]  # starting at x=0 locks in, because random*0 = 0
+        
+    ln_priors = lnpriorobj(frac_red_mean)
     prior_parameters = ln_priors(param_init, return_prior_parameters=True)
 
     # set up file names
@@ -978,6 +1079,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     param_names = ['crange', 'maglimoff', 'deltapixorig', 'mfitrange', 'd_arcsec',  'd_pix_offset',
                    'floorfrac_value', 'dr', 'r_interval_range', 'nrgbstars', 'n_substeps', 
                    'masksig', 'noisemasksig', 'n_fit_min', 'frac_red_mean', 
+                   'f_red_model_incl', 'f_red_model_pa', 'f_red_model_hz_over_hr',
                    'Amag_AV', 'Acol_AV', 'reference_color', 
                    'nwalkers', 'nsamp', 'nburn', 
                    'fileroot', 'datadir', 'datafile', 'savefile', 
@@ -1029,6 +1131,40 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     lgnstar_array = np.log10(iAV.get_nstar_at_ra_dec(ra_cen_array, dec_cen_array))
     lgnstar_range = [nanmin(lgnstar_array), nanmax(lgnstar_array)]
     print 'Log10 Nstar density Fitting Range: ', lgnstar_range
+
+    # Calculate expected values of f_red to set position-dependent prior properly.
+
+    frac_red_array = analysis.get_model_frac_red(ra_cen_array, dec_cen_array,
+                                              pa = f_red_model_pa,
+                                              inclination = f_red_model_incl,
+                                              hz_over_hr = f_red_model_hz_over_hr,
+                                              make_plot=False)
+
+    # Interpolate to get position-dependent initial guess for A_V, if file given
+
+    if (AV_fitsfile != ''):
+        print 'Initializing guesses for A_V from ', AV_fitsfile
+        hdulist = fits.open(AV_fitsfile)
+        AVfits = np.array(hdulist[0].data)
+        hdr = hdulist[0].header
+        hdulist.close()
+        # set up WCS and get x, y of AV_fits image at locations of new grid
+        w = wcs.WCS(hdr)
+        i_fits_interp = np.array(w.wcs_world2pix(ra_cen_array, dec_cen_array, 0)).astype(int)
+        i_y_fits_interp = i_fits_interp[0,:,:]
+        i_x_fits_interp = i_fits_interp[1,:,:]
+        # grab closest element of new grid, after clipping at image size
+        AVinitmin = 0.05   # to handle if interpolates into zero or -666 region
+        AV_init_array = np.maximum(AVfits[np.minimum(i_x_fits_interp, AVfits.shape[0] - 1),
+                                          np.minimum(i_y_fits_interp, AVfits.shape[1] - 1)],
+                                   AVinitmin)
+        print 'Range of AV_init_array: ', np.min(AV_init_array), np.max(AV_init_array)
+
+    else:
+
+        print 'Using fixed initial guesses for A_V = ', param_init[1]
+        AV_init_array = AVinitval + 0.0 * ra_cen_array
+        
 
     # limit the number of radial foreground CMDs to return to save space
     dlgn_padding = 0.1
@@ -1121,11 +1257,13 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
     nz_derived = 8
     nz_derived_sigma = nz_derived * 3
     nz_quality = 2
+    nz_fred_prior = 3
     bestfit_values = zeros([nx, ny, nz_bestfit]) - 666.
     percentile_values = zeros([nx, ny, nz_sigma]) - 666.
     quality_values = zeros([nx, ny, nz_quality]) - 666.
     derived_values = zeros([nx, ny, nz_derived]) - 666.
     derived_percentile_values = zeros([nx, ny, nz_derived_sigma]) - 666.
+    fred_prior_values = zeros([nx, ny, nz_fred_prior]) - 666.
     output_map = zeros([nx,ny]) - 666.
 
 
@@ -1196,12 +1334,6 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
             maglim110 = maglim_array[0, i_lgn]
             maglim160 = maglim_array[1, i_lgn]
 
-            # set up function for likelihood fitting
-
-            lnp_func = likelihoodobj(fg_cmd, noise_model, datamask, 
-                                     color_boundary, qmag_boundary, 
-                                     noise_frac, floorfrac_value)
-
             # loop through pixels in the lgnstar density bin, fitting for parameters
 
             for i_pix in range(len(i_ra)):
@@ -1209,6 +1341,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                 i_stars = i_ra_dec_vals[i_ra[i_pix], i_dec[i_pix]]
                 nstar_1 = len(i_stars)
                 nstar   = len(i_stars)
+                frac_red_mean = frac_red_array[i_ra[i_pix], i_dec[i_pix]]
 
                 trypix = True
                 if nstar_1 > n_fit_min: 
@@ -1249,13 +1382,24 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
 
                     nsamp = 75
 
-                    #plt.plot(i_c,i_q,',',color='red')
-                    #plt.draw()
+                    # set up function for likelihood fitting
+
+                    lnp_func = likelihoodobj(fg_cmd, noise_model, datamask, 
+                                             color_boundary, qmag_boundary, 
+                                             noise_frac, floorfrac_value,
+                                             frac_red_mean)
+
+                    # set up function for priors
+                    ln_priors = lnpriorobj(frac_red_mean)
 
                     ## run fit...
                     samp, d, bestfit, sigma, acor = run_emcee(i_c, i_q,
-                                                              param_init,
+                                                              #param_init,
+                                                              [param_init[0], 
+                                                               AV_init_array[i_ra[i_pix], i_dec[i_pix]],
+                                                               param_init[2]],
                                                               likelihoodfunction = lnp_func,
+                                                              priorfunction = ln_priors, 
                                                               nwalkers=nwalkers, 
                                                               nsteps=nsamp, 
                                                               nburn=nburn)
@@ -1267,6 +1411,12 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                     idx = d['lnp'].argmax()
                     quality_values[i_ra[i_pix], i_dec[i_pix], :] = [(d['lnp'][idx])/nstar, nstar]
                     
+                    # update prior parameters for best fit, and update into processing_params
+                    prior_parameters = ln_priors(bestfit, return_prior_parameters=True)
+                    fred_prior_values[i_ra[i_pix], i_dec[i_pix], :] = [prior_parameters['f_mean'],
+                                                                       prior_parameters['f_fill'],
+                                                                       prior_parameters['f_mean_corr']]
+
                     # change x=ln(f/(1-f)) to f in bestfit
                     alpha = log(0.5) / log(frac_red_mean)
                     x = bestfit_values[i_ra[i_pix], i_dec[i_pix], 0]
@@ -1340,18 +1490,36 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                     derived_percentile_values[i_ra[i_pix], i_dec[i_pix], :] = percentile_derived.flatten()
 
                     if (save_single_pix): 
+                        print 'Bestfit: ', bestfit
+                        print 'alpha: ', alpha
+                        print 'frac_red_mean', frac_red_mean
+                        print ' best f: ', (exp(bestfit[0]) / (1.0 + exp(bestfit[0])))**(1.0/alpha)
                         fake_cmd = makefakecmd(fg_cmd, color_boundary, qmag_boundary,
                                                [bestfit[0], bestfit[1], bestfit[2], 0.20443, 
                                                 (0.33669 - 0.20443)], 
                                                floorfrac=floorfrac_value, 
                                                mask=datamask, SHOWPLOT=False,
                                                noise_model = noise_model,
-                                               noise_frac = noise_frac)
+                                               noise_frac = noise_frac,
+                                               frac_red_mean = frac_red_mean,
+                                               print_fred = True)
+
+                        # update prior parameters for best fit, and update into processing_params
+                        prior_parameters = ln_priors(bestfit, return_prior_parameters=True)
+                        allparamvals = locals()
+                        processing_params = {k: allparamvals[k] for k in param_names}
+                        f_fill = prior_parameters['f_fill']
+                        f_mean_corr = prior_parameters['f_mean_corr']
+                        p0sig = prior_parameters['p0sig']
+                        print 'f_red_geom: %4.2f   f_fill: %4.2f   f_mean_corr: %4.2f ' % (frac_red_mean, f_fill, f_mean_corr)
+                        print 'p0sig: ', p0sig
+                        print 'Used initial guess of AV = ', AV_init_array[i_ra[i_pix], i_dec[i_pix]]
 
                         demosavefile = 'demo_modelfit_data_' + str(i_ra[i_pix]) + '_' +    \
                             str(i_dec[i_pix]) + '.npz'
                         print 'Saving demo data to ', demosavefile
                         savez(demosavefile, 
+                              processing_params = processing_params,
                               derived_value_vec = derived_value_vec,
                               d_derived = d_derived,
                               percentile_derived = percentile_derived, 
@@ -1373,7 +1541,10 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                               i_ra = i_ra[i_pix], 
                               i_dec = i_dec[i_pix],
                               alpha = alpha,
-                              frac_red_mean = frac_red_mean)
+                              frac_red_mean = frac_red_mean,
+                              f_fill = f_fill,
+                              f_mean_corr = f_mean_corr,
+                              p0sig = p0sig)
                         
                         return d_derived, percentile_derived, samp, d, bestfit, sigmavec, \
                             i_c, i_q, fg_cmd, fake_cmd
@@ -1407,10 +1578,11 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
                     derived_values[i_ra[i_pix], i_dec[i_pix], :] = np.zeros(nz_derived) - 666
                     derived_percentile_values[i_ra[i_pix], i_dec[i_pix], :] = np.zeros(nz_derived_sigma) - 666
                     quality_values[i_ra[i_pix], i_dec[i_pix], :] = [-666, nstar]
+                    fred_prior_values[i_ra[i_pix], i_dec[i_pix], :] = [-666, -666, -666]
                     acor = -666
                 
                 print i_ra[i_pix], i_dec[i_pix], bestfit_values[i_ra[i_pix], i_dec[i_pix]], \
-                    acor, quality_values[i_ra[i_pix], i_dec[i_pix]]
+                    fred_prior_values[i_ra[i_pix], i_dec[i_pix]], quality_values[i_ra[i_pix], i_dec[i_pix]]
 
             plt.figure(4)
             plt.clf()
@@ -1444,6 +1616,7 @@ def run_one_brick(fileroot, datadir='../../Data/', results_extension='',
               quality_values=quality_values,
               derived_values=derived_values,
               derived_percentile_values=derived_percentile_values,
+              fred_prior_values=fred_prior_values,
               ra_bins = ra_local,
               dec_bins = dec_local,
               ra_global = ra_global,
@@ -1519,10 +1692,11 @@ def fit_ra_dec_regions(ra, dec, d_arcsec = 10.0, nmin = 15.0,
                 frac_red_mean = 0.5
                 alpha = log(0.5) / log(frac_red_mean)
                 x = bestfit_values[i_ra, i_dec, 0]
-                f = (exp(x) / (1.0 + exp(x)))**alpha
+                #### NOTE: THIS WAS DIFFERENT CONVERSION THAN ELSEWHERE!!!! exponent Fixed, but not tested
+                f = (exp(x) / (1.0 + exp(x)))**(1.0/alpha)
                 bestfit_values[i_ra, i_dec, 0] = f
                 x = percentile_values[i_ra, i_dec, 0:3]
-                f = (exp(x) / (1.0 + exp(x)))**alpha
+                f = (exp(x) / (1.0 + exp(x)))**(1.0/alpha)
                 percentile_values[i_ra, i_dec, 0:3] = f
                 
                 # if requested, plot results
@@ -1678,11 +1852,98 @@ def find_peak_skew_normal(mean=0., stddev=1.):
     plt.plot(avec, p2(avec))
     plt.plot(avec, pkvec - p2(avec))
 
-
-
 ############# CODE FOR RUNNING EMCEE AND PLOTTING RESULTS ###################
 
-def ln_priors(p, return_prior_parameters=False):
+def ln_priors_function(p, return_prior_parameters=False, f_mean=0.2):
+
+    # set up easy ranges (AV, sig)
+
+    p1 = [0.0001, 10.0]         # median A_V
+    p2 = [0.01, 1.5]            # sigma
+                              
+    if ((p1[0] > p[1]) | (p[1] > p1[1]) | 
+        (p2[0] > p[2]) | (p[2] > p2[1])):
+
+        return -np.inf
+
+    # set up ranges for x (i.e., regularlized f_red)
+
+    alpha = np.log(0.5) / np.log(f_mean)
+    frange = np.array([0.05, 0.95])
+    p0 = np.log(frange**alpha / (1.0 - frange**alpha))
+                              
+    if ((p0[0] > p[0]) | (p[0] > p0[1])):
+
+        return -np.inf
+
+    # correct geometrical f_mean for A_V-dependent filling factors
+    gamma = 3.0
+    AV0 = 0.25
+    f_mean_min = 0.1
+    #f_fill_min = f_mean_min / f_mean
+    f_fill_min = 0.66667
+
+    f_fill = f_fill_min + (1.0 - f_fill_min) * ((p[1]/AV0)**gamma / 
+                                                (1.0 + (p[1]/AV0)**gamma))
+    f_mean_corr = np.maximum(f_mean * f_fill, f_mean_min)
+    
+    # shift mean of x from 0 at f=f_mean, to x_corr equivalent to f_mean_corr
+    x_corr = np.log(f_mean_corr**alpha / (1.0 - f_mean_corr**alpha))
+    
+    # set up split-normal for x
+
+    #bsig0 = 0.2
+    bsig0 = 0.10
+    asig0 = 0.15
+    sig0max = 1.5
+    p0sigma = min(f_mean**0.35 * 10.0**(bsig0 + asig0*p[1]), sig0max)
+    p0scale = [1.5, 1.0]
+    p0scale1 = 2.0
+    p0scale2 = 1.5
+    # set split gaussian widths (for < x_corr and >x_corr)
+    p0sig1 = p0scale1 * p0sigma * (f_mean_corr / 0.5)**p0scale[0]
+    p0sig2 = p0scale2 * p0sigma * ((1.0 - f_mean_corr) / 0.5)**p0scale[1]
+    p0sigvec = [p0sig1, p0sig2]
+    # automatically select proper sigma, based on p[0]<0 or p[0]>0
+    p0sig = p0sigvec[((np.sign(p[0] - x_corr) + 1) / 2).astype(int)]
+
+
+    # set up log normal for sigma, keeping same mode
+    p2mode = 0.35              # w = broad gaussian 
+    p2sigma = 0.5
+    p2mu = np.log(p2mode) + p2sigma**2   # mu = ln(median)
+
+    if return_prior_parameters:
+
+        return {'p0': p0, 'p1': p1, 'p2': p2, 'frange': frange,
+                'gamma': gamma, 'AV0': AV0, 'f_mean_min': f_mean_min, 'AVparam': p[1],
+                'f_mean': f_mean, 'f_fill': f_fill, 'f_mean_corr': f_mean_corr, 'x_corr': x_corr,
+                'alpha': alpha,
+                'p0sigma': p0sigma, 'p0scale': p0scale, 'p0scale1': p0scale1, 'p0scale2': p0scale2, 
+                'p0sigvec': p0sigvec, 'p0sig': p0sig,
+                'bsig0': bsig0, 'asig0': asig0, 'sig0max': sig0max,
+                'p2mode': p2mode, 'p2sigma': p2sigma,   'p2mu': p2mu}
+
+    else: 
+
+        # if all parameters are in range, return the ln of the Gaussian 
+        # (for a Gaussian prior on x) and the ln of the log normal prior
+        # on sigma (p[2])
+        
+        # baseline so no zero problems
+        lnp = 0.0000001
+
+        # Split gaussian for p[0] = x
+        y = (p[0] - x_corr) / p0sig
+        lnp += - 0.5 * y**2
+
+        # Log normal on p[2] (= sigma, width of log normal A_V)
+        lnp += - np.log(p[2]) - 0.5 * (np.log(p[2]) - p2mu) ** 2 / p2sigma**2
+
+        return lnp
+
+
+def ln_priors_old(p, return_prior_parameters=False):
     
     # set up ranges
 
@@ -1728,10 +1989,10 @@ def ln_priors(p, return_prior_parameters=False):
         lnp = 0.0000001
         #lnp += -0.5 * (p[0] - p0mean) ** 2 / p0stddev**2
         lnp += - np.log(p[0]-p0offset) - 0.5 * (np.log(p[0]-p0offset) - p0mu) ** 2 / p0sigma**2
+        lnp += -(- np.log(-p0offset) - 0.5 * (np.log(-p0offset) - p0mu) ** 2 / p0sigma**2)  # keep peak constant for changing p0sigma
         lnp += - np.log(p[2]) - 0.5 * (np.log(p[2]) - p2mu) ** 2 / p2sigma**2
 
         return lnp
-
     
 def ln_prob(param, i_star_color, i_star_magnitude):
 
@@ -1743,7 +2004,7 @@ def ln_prob(param, i_star_color, i_star_magnitude):
     return lnp + cmdlikelihoodfunc(param, i_star_color, i_star_magnitude)
     
 
-def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.4], likelihoodfunction='',
+def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.4], likelihoodfunction='', priorfunction='',
               nwalkers=50, nsteps=10, nburn=150, nthreads=0, pool=None):
     # NOTE: nthreads not actually enabled!  Keep nthreads=0!
 
@@ -1751,7 +2012,8 @@ def run_emcee(i_color, i_qmag, param=[0.5,1.5,0.4], likelihoodfunction='',
 
     # setup emcee
 
-    assert(ln_priors(param)), "First Guess outside the priors"
+    #assert(ln_priors(param)), "First Guess outside the priors"
+    assert(priorfunction(param)), "First Guess outside the priors"
 
     ndim = len(param)
 

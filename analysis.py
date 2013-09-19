@@ -2732,23 +2732,26 @@ def plot_pixel_demo(fileroot = 'demo_modelfit_data_7_63'):
     #print d
     #print d['A_V']
     bestfit = dat['bestfit']
-    frac_red_mean = 0.4
+    #frac_red_mean = 0.4
+    frac_red_mean = dat['frac_red_mean']
     x = bestfit[0]
     alpha = np.log(0.5) / np.log(frac_red_mean)
     f = (np.exp(x) / (1.0 + np.exp(x)))**(1./alpha)
-    sigma_squared = np.log((1. + np.sqrt(1. + 4. * (bestfit[2])**2)) / 2.)
-    sigma = np.sqrt(sigma_squared)
+    sigma = bestfit[2]
+    #sigma_squared = np.log((1. + np.sqrt(1. + 4. * (bestfit[2])**2)) / 2.)
+    #sigma = np.sqrt(sigma_squared)
     i_c = dat['i_c']
     i_q = dat['i_q']
     crange = [min(color_boundary), max(color_boundary)]
     qrange = [min(qmag_boundary), max(qmag_boundary)]
     AVvec = d['A_V']
-    sigmavec = np.sqrt(np.log((1. + np.sqrt(1. + 4. * (d['w'])**2)) / 2.))
-    sigmavec = d_derived['sigmavec']
+    #sigmavec = np.sqrt(np.log((1. + np.sqrt(1. + 4. * (d['w'])**2)) / 2.))
+    #sigmavec = d_derived['sigmavec']
+    sigmavec = d['sigma']
     fvec = (np.exp(d['x']) / (1.0 + np.exp(d['x'])))**(1./alpha)
     meanAVvec = d_derived['meanAVvec']
-    fdensevec = d_derived['fdenseval_1']
-    fsfvec = d_derived['fdenseval_5']
+    fdensevec = d_derived['fdensevec_1']
+    fsfvec = d_derived['fdensevec_5']
 
     cinterp = interp.interp1d(np.arange(len(color_boundary)), color_boundary)
     qinterp = interp.interp1d(np.arange(len(qmag_boundary)), qmag_boundary)
@@ -2772,6 +2775,7 @@ def plot_pixel_demo(fileroot = 'demo_modelfit_data_7_63'):
     plt.imshow(dat['fg_cmd'],extent=[crange[0],crange[1],qrange[1],qrange[0]], 
                origin='upper',aspect='auto', interpolation='nearest', cmap='gist_heat_r')
     plt.plot(c, q, '*', color='blue', linewidth=0, ms=12)
+    print len(c[q<21]), len(c[(c>1)&(q<21)])
     plt.axis([crange[0],crange[1],qrange[1],qrange[0]])
     plt.xlabel('F110W - F160W')
     plt.ylabel('Extinction Corrected F160W')
@@ -2915,6 +2919,113 @@ def plot_dense_gas(filename='merged.npz', resultsdir='../Results/', AKthresh=0.1
     AVbins = np.linspace(0.01,10.0,100)
     lgAVbins = np.log10(np.linspace(0,10.0,100))
     plt.hist(AVmean[iAVgood],bins=lgAVbins, log=True)
+
+    return
+
+def make_noninterleaved_fits(fileroot='merged', resultsdir='../Results/',
+                             cleanstr = '_clean', fileextension=''):
+
+    d = np.load(resultsdir + fileroot + fileextension + '.npz')
+    x = d['ra_bins']
+    y = d['dec_bins']
+
+    # median extinction
+    exten = '.AV'
+    arrayname = 'bestfit_values' + cleanstr
+    arraynum = 1
+    a = d[arrayname][:,:,arraynum]
+    fitsfile = resultsdir + fileroot + fileextension + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, a, x, y)
+    AV = a
+
+    # mean extinction
+    exten = '.meanAV'
+    if (fileroot == 'merged'):
+        arrayname = 'dervied_values' + cleanstr  #  note mispelling!
+    else:
+        arrayname = 'derived_values' + cleanstr
+    arraynum = 0
+    a = d[arrayname][:,:,arraynum]
+    fitsfile = resultsdir + fileroot + fileextension + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, a, x, y)
+    meanAV = a
+
+    # reddening fraction
+    exten = '.fred'
+    arrayname = 'bestfit_values' + cleanstr
+    arraynum = 0
+    a = d[arrayname][:,:,arraynum]
+    fitsfile = resultsdir + fileroot + fileextension + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, a, x, y)
+    fred = a
+
+    # sigma
+    exten = '.sigma'
+    arrayname = 'bestfit_values' + cleanstr
+    arraynum = 2
+    a = d[arrayname][:,:,arraynum]
+    fitsfile = resultsdir + fileroot + fileextension + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, a, x, y)
+    sigma = a
+
+    # uncertainties
+
+    exten = '.AVerr'
+    arrayname = 'percentile_values'
+    arraynum = 3
+    a1 = d[arrayname][:,:,arraynum]
+    arraynum = 5
+    a2 = d[arrayname][:,:,arraynum]
+    fitsfile = resultsdir + fileroot + fileextension + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, (a2 - a1)/2.0, x, y)
+    exten = '.AVfracerr'
+    fitsfile = resultsdir + fileroot + fileextension + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, ((a2 - a1)/2.0) / AV, x, y)
+
+
+    exten = '.meanAVerr'
+    arrayname = 'derived_percentile_values'
+    arraynum = 0
+    a1 = d[arrayname][:,:,arraynum]
+    arraynum = 2
+    a2 = d[arrayname][:,:,arraynum]
+    fitsfile = resultsdir + fileroot + fileextension + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, (a2 - a1)/2.0, x, y)
+    exten = '.meanAVfracerr'
+    fitsfile = resultsdir + fileroot + fileextension + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, ((a2 - a1)/2.0) / meanAV, x, y)
+
+    exten = '.frederr'
+    arrayname = 'percentile_values'
+    arraynum = 0
+    a1 = d[arrayname][:,:,arraynum]
+    arraynum = 2
+    a2 = d[arrayname][:,:,arraynum]
+    fitsfile = resultsdir + fileroot + fileextension + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, (a2 - a1)/2.0, x, y)
+
+    exten = '.sigmaerr'
+    arrayname = 'percentile_values'
+    arraynum = 6
+    a1 = d[arrayname][:,:,arraynum]
+    arraynum = 8
+    a2 = d[arrayname][:,:,arraynum]
+    fitsfile = resultsdir + fileroot + fileextension + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, (a2 - a1)/2.0, x, y)
+    exten = '.sigmafracerr'
+    fitsfile = resultsdir + fileroot + fileextension + exten + '.fits'
+    print 'Writing fits file: ', fitsfile
+    make_fits_image(fitsfile, ((a2 - a1)/2.0) / sigma, x, y)
 
     return
 
@@ -4225,14 +4336,16 @@ def plot_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     return
 
 def fit_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2, 
-                            imgexten='.png', r_range=[0, 1.4]):
+                           imgexten='.png', r_range=[0, 1.4],
+                           resultsdir = '../Results/',
+                           fileroot = 'merged_interleave'):
 
-    resultsdir = '../Results/'
-    fileroot = 'merged_interleave'
-    AVfile = resultsdir + fileroot + '.AV.fits'
-    AVerrfile = resultsdir + fileroot + '.AVerr.fits'
+    #AVfile = resultsdir + fileroot + '.AV.fits'
+    #AVerrfile = resultsdir + fileroot + '.AVerr.fits'
+    AVfile = resultsdir + fileroot + '.meanAV.fits'
+    AVerrfile = resultsdir + fileroot + '.meanAVerr.fits'
     ffile = resultsdir + fileroot + '.fred.fits'
-    ferrfile = resultsdir + fileroot + '.ferr.fits'
+    ferrfile = resultsdir + fileroot + '.frederr.fits'
 
     output_fred_datamap_file = resultsdir + fileroot + '.fredfitdatamap' + imgexten
     output_fred_modelmap_file = resultsdir + fileroot + '.fredfitmodelmap' + imgexten
@@ -4267,7 +4380,7 @@ def fit_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
 
     # keep only high extinction, high reliability points
 
-    i_keep = np.where((AV > AVthresh) & (AVfracerr < AVfracerrthresh) & (ferr < ferrthresh))
+    i_keep = np.where((AV > AVthresh) & (AVfracerr < AVfracerrthresh) & (ferr < ferrthresh) & (f > 0.075))
     i_ra = i_keep[1]
     i_dec = i_keep[0]
     f = f[i_keep]
