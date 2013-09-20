@@ -943,7 +943,7 @@ class likelihoodobj(object):
 
         return self(*args)
 
-def test_run_one_brick(datadir='../../Data/', results_extension = '', AV_fitsfile=''):
+def test_run_one_brick(pix='', datadir='../../Data/', results_extension = '', AV_fitsfile=''):
     """
     Test code using single pixel
     """
@@ -1006,6 +1006,17 @@ def test_run_one_brick(datadir='../../Data/', results_extension = '', AV_fitsfil
     grab_ira_idec = [5, 12]    # high sigma in low res
     grab_ira_idec = [17, 18]    # high sigma in low res
     grab_ira_idec = [9, 17]    # high sigma in low res
+
+    fileroot = 'ir-sf-b02-v8-st'
+    d_arcsec = 6.64515
+    grab_ira_idec = [98, 3]    # high sigma in low res
+    grab_ira_idec = [97, 3]    # high sigma in low res
+
+    if (pix != '') and (len(pix) == 2):
+        grab_ira_idec = pix
+
+    print 'File:  ',  fileroot
+    print 'Pixel: ', grab_ira_idec
 
     d_derived, percentile_derived, samp, d, bestfit, sigmavec, i_c, i_q, fg_cmd, fake_cmd \
         = run_one_brick(fileroot, datadir=datadir, results_extension=results_extension, 
@@ -1869,7 +1880,7 @@ def ln_priors_function(p, return_prior_parameters=False, f_mean=0.2):
     # set up ranges for x (i.e., regularlized f_red)
 
     alpha = np.log(0.5) / np.log(f_mean)
-    frange = np.array([0.05, 0.95])
+    frange = np.array([0.02, 0.98])
     p0 = np.log(frange**alpha / (1.0 - frange**alpha))
                               
     if ((p0[0] > p[0]) | (p[0] > p0[1])):
@@ -1877,51 +1888,56 @@ def ln_priors_function(p, return_prior_parameters=False, f_mean=0.2):
         return -np.inf
 
     # correct geometrical f_mean for A_V-dependent filling factors
-    gamma = 3.0
-    AV0 = 0.25
-    f_mean_min = 0.1
-    #f_fill_min = f_mean_min / f_mean
-    f_fill_min = 0.66667
+    gamma = 2.0
+    AV0 = 0.2
 
+    f_fill_min = 0.1
     f_fill = f_fill_min + (1.0 - f_fill_min) * ((p[1]/AV0)**gamma / 
                                                 (1.0 + (p[1]/AV0)**gamma))
-    f_mean_corr = np.maximum(f_mean * f_fill, f_mean_min)
+    #f_mean_corr = np.maximum(f_mean * f_fill, f_mean_min)
+    f_mean_corr = f_mean * f_fill
     
     # shift mean of x from 0 at f=f_mean, to x_corr equivalent to f_mean_corr
     x_corr = np.log(f_mean_corr**alpha / (1.0 - f_mean_corr**alpha))
+
+    # set range over which we want typical f to vary
+    #frangescale = 0.25
+    frangescale = 0.5
+    df = 0.15
+    fsigrange = [f_mean*frangescale, f_mean + min(df, 0.99 - f_mean)]
+    x_min = np.log(fsigrange[0]**alpha 
+                   / (1.0 - fsigrange[0]**alpha))
+    x_max = np.log(fsigrange[1]**alpha 
+                   / (1.0 - fsigrange[1]**alpha))
     
     # set up split-normal for x
 
-    #bsig0 = 0.2
-    bsig0 = 0.10
-    asig0 = 0.15
-    sig0max = 1.5
-    p0sigma = min(f_mean**0.35 * 10.0**(bsig0 + asig0*p[1]), sig0max)
-    p0scale = [1.5, 1.0]
-    p0scale1 = 2.0
-    p0scale2 = 1.5
+    p0scale1 = 0.1
+    p0scale2 = 0.5
     # set split gaussian widths (for < x_corr and >x_corr)
-    p0sig1 = p0scale1 * p0sigma * (f_mean_corr / 0.5)**p0scale[0]
-    p0sig2 = p0scale2 * p0sigma * ((1.0 - f_mean_corr) / 0.5)**p0scale[1]
+    p0sig1 = p0scale1 * min(abs(x_corr - x_min), x_min*1.05)
+    p0sig2 = p0scale2 * (x_max - x_corr)
+
     p0sigvec = [p0sig1, p0sig2]
     # automatically select proper sigma, based on p[0]<0 or p[0]>0
     p0sig = p0sigvec[((np.sign(p[0] - x_corr) + 1) / 2).astype(int)]
 
 
     # set up log normal for sigma, keeping same mode
-    p2mode = 0.35              # w = broad gaussian 
+    p2mode = 0.30              # w = broad gaussian 
     p2sigma = 0.5
     p2mu = np.log(p2mode) + p2sigma**2   # mu = ln(median)
 
     if return_prior_parameters:
 
         return {'p0': p0, 'p1': p1, 'p2': p2, 'frange': frange,
-                'gamma': gamma, 'AV0': AV0, 'f_mean_min': f_mean_min, 'AVparam': p[1],
-                'f_mean': f_mean, 'f_fill': f_fill, 'f_mean_corr': f_mean_corr, 'x_corr': x_corr,
+                'gamma': gamma, 'AV0': AV0, 'AVparam': p[1],
+                'f_mean': f_mean, 'f_fill': f_fill, 'f_mean_corr': f_mean_corr, 'x_corr': x_corr, 
+                'f_fill_min': f_fill_min, 'frangescale': frangescale, 'df': df, 
+                'fsigrange': fsigrange, 'x_min': x_min, 'x_max': x_max,
                 'alpha': alpha,
-                'p0sigma': p0sigma, 'p0scale': p0scale, 'p0scale1': p0scale1, 'p0scale2': p0scale2, 
+                'p0scale1': p0scale1, 'p0scale2': p0scale2, 
                 'p0sigvec': p0sigvec, 'p0sig': p0sig,
-                'bsig0': bsig0, 'asig0': asig0, 'sig0max': sig0max,
                 'p2mode': p2mode, 'p2sigma': p2sigma,   'p2mu': p2mu}
 
     else: 

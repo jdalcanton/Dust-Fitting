@@ -606,7 +606,8 @@ def theme(type='beauty', ax=None):
 	setNminors(5,5, ax=ax)
 	draw_if_interactive()
 
-def plotCorr(l, pars, plotfunc=None, lbls=None, *args, **kwargs):
+def plotCorr(l, pars, plotfunc=None, lbls=None, axisvec=None, alphaval=1.0, plotratio=False, plotdiff=False,
+	     *args, **kwargs):
 	""" Plot correlation matrix between variables
 		inputs
 			l  -- dictionary of variables (could be a Table)
@@ -639,10 +640,23 @@ def plotCorr(l, pars, plotfunc=None, lbls=None, *args, **kwargs):
 				ax = subplot(len(pars)-1,len(pars)-1,k, sharey=sharey, sharex=sharex)
 				axes[j,i] = ax
 				if plotfunc == None:
-					plot(l[pars[i]],l[pars[j]],',',**kwargs)
+					if plotratio:
+						plot(l[pars[i]],l[pars[j]]/l[pars[i]],',',alpha=alphaval,**kwargs)
+						plot([min(l[pars[i]]), max(l[pars[i]])], [1, 1])
+					else:
+						if plotdiff: 
+							plot(l[pars[i]],l[pars[j]]-l[pars[i]],',',
+							     alpha=alphaval,**kwargs)
+							plot([min(l[pars[i]]), max(l[pars[i]])], [0, 0])
+						else:
+							plot(l[pars[i]],l[pars[j]],',',alpha=alphaval,**kwargs)
+						
 				else:
 					plotfunc(l[pars[i]],l[pars[j]],*args, **kwargs)
-					
+
+				if axisvec != None:
+					axis(axisvec)
+
 				theme(ax=ax)
 				tlabels = gca().get_xticklabels()
 				setp(tlabels, 'fontsize', 2*fontmap[len(pars)-1])
