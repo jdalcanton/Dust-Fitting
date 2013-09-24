@@ -325,9 +325,9 @@ def ln_priors_function(p, return_prior_parameters=False, f_mean=0.2):
     x_corr = np.log(f_mean_corr**alpha / (1.0 - f_mean_corr**alpha))
 
     # set range over which we want typical f to vary
-    frangescale = 0.25
-    df = 0.15
-    fsigrange = [f_mean*frangescale, f_mean + min(df, 0.99 - f_mean)]
+    frangescale = 0.3333
+    df_hi = 0.25
+    fsigrange = [f_mean*frangescale, f_mean + min(df_hi, 0.99 - f_mean)]
     x_min = np.log(fsigrange[0]**alpha 
                    / (1.0 - fsigrange[0]**alpha))
     x_max = np.log(fsigrange[1]**alpha 
@@ -335,7 +335,7 @@ def ln_priors_function(p, return_prior_parameters=False, f_mean=0.2):
     
     # set up split-normal for x
 
-    p0scale1 = 0.1
+    p0scale1 = 0.3
     p0scale2 = 0.5
     # set split gaussian widths (for < x_corr and >x_corr)
     p0sig1 = p0scale1 * min(abs(x_corr - x_min), x_min*1.05)
@@ -356,7 +356,7 @@ def ln_priors_function(p, return_prior_parameters=False, f_mean=0.2):
         return {'p0': p0, 'p1': p1, 'p2': p2, 'frange': frange,
                 'gamma': gamma, 'AV0': AV0, 'AVparam': p[1],
                 'f_mean': f_mean, 'f_fill': f_fill, 'f_mean_corr': f_mean_corr, 'x_corr': x_corr, 
-                'f_fill_min': f_fill_min, 'frangescale': frangescale, 'df': df, 
+                'f_fill_min': f_fill_min, 'frangescale': frangescale, 'df_hi': df_hi, 
                 'fsigrange': fsigrange, 'x_min': x_min, 'x_max': x_max,
                 'alpha': alpha,
                 'p0scale1': p0scale1, 'p0scale2': p0scale2, 

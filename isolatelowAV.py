@@ -627,11 +627,12 @@ def plot_allbricks_ra_dec(saveplots = True, makenoise = False):
     newsavefilename = fileroot + '.clean.npz'
     noise_tweek = 0.0
     if (makenoise == True):
-        noise_tweek = 0.0075
+        #noise_tweek = 0.0075
+        noise_tweek = 0.015
         print 'Making noise file with more generous selection'
         newsavefilename = fileroot + '.noise.clean.npz'
-        print 'Not saving images'
-        saveplots = False
+        #print 'Not saving images'
+        #saveplots = False
     
     rplot_vec = [0.25, 0.55, 1.05]
 
@@ -705,7 +706,12 @@ def plot_allbricks_ra_dec(saveplots = True, makenoise = False):
     
     # Set Draine A_V limit
     draineratiofix = 2.3
-    draineAVlim = 0.25 * draineratiofix
+    #draineAVlim = 0.25 * draineratiofix
+    desiredAVlim = 0.25
+    if (makenoise):
+        desiredAVlim *= 1.5
+    draineAVlim = desiredAVlim * draineratiofix
+    print 'Clipping to regions where A_V < ', desiredAVlim
 
     # Generate indices for grid points and all stars that meet
     # likely low-extinction criteria.
@@ -730,8 +736,6 @@ def plot_allbricks_ra_dec(saveplots = True, makenoise = False):
     # save data from low extinction regions to file
     # save clean data to a new file
 
-    print 'Saving clean data to ', newsavefilename
-    
     dat = np.load(savefilename)
     np.savez(newsavefilename,
              cnarrow = dat['cnarrow'][i_lowAV_stars],
@@ -759,6 +763,8 @@ def plot_allbricks_ra_dec(saveplots = True, makenoise = False):
              b_rgbw_lo = b_rgbw_lo,
              ref_lgn = ref_lgn,
              ref_rgbw = ref_rgbw)
+    print 'Saved %d stars of cleaned data to %s' % (len(dat['cnarrow'][i_lowAV_stars]),
+                                                     newsavefilename)
     del dat   # clear memory
 
     # set up vectors for plotting the selection boundaries
@@ -1288,6 +1294,8 @@ def read_clean(readnoise = False):
     savefilename = resultsdir + 'allbricks.clean.npz'
     if readnoise:
         savefilename = resultsdir + 'allbricks.noise.clean.npz'
+    
+    print 'Reading clean data from ', savefilename
 
     dat = np.load(savefilename)
 
@@ -1655,15 +1663,15 @@ def make_radial_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
             meanr_array, rrange_array, meancol_array, sigcol_array, \
             n_array, maglim_array, mboundary, cboundary
 
-def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3., 
+def make_nstar_selected_low_AV_cmds(nrgbstars = 2750, nsubstep=6., 
                             mrange = [18.2, 25.],
                             crange = [0.3, 2.5],
                             deltapixorig = [0.015,0.25],
                             mnormalizerange = [19,21.5], 
-                            maglimoff = [0.0, 0.25],
+                            maglimoff = [0.0, 0.5],
                             nsig_blue_color_cut = 2.0, blue_color_cut_mask_only=False,
                             usemask=True, masksig=[2.5,3.0],
-                            makenoise=False, noisemasksig=[4.5,4.5],
+                            makenoise=False, noisemasksig=[4.5,3.5],
                             useq=False, reference_color=1.0,
                             restricted_n_range=''):
 
@@ -1736,7 +1744,8 @@ def make_nstar_selected_low_AV_cmds(nrgbstars = 2500, nsubstep=3.,
     while (len(bad_dnstar) > 0): 
 
         # and is the gap not in the last, unmergeable bin?
-        if (bad_dnstar[0] + 1 < len(nnstarlo) - 1):
+        #if (bad_dnstar[0] + 1 < len(nnstarlo) - 1):
+        if (bad_dnstar[0] < len(nnstarlo) - 1):
 
             # if so, merge the first instance with the adjacent cell
             print 'Merging ', bad_dnstar[0], ' with ', bad_dnstar[0] + 1, '.  ', \
