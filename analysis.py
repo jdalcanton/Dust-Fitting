@@ -5,6 +5,7 @@ import scipy.special as spec
 import scipy.stats as stats
 import scipy.integrate as integrate
 import scipy.interpolate as interp
+import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import read_brick_data as rbd
 import makefakecmd as mfc
@@ -21,10 +22,11 @@ import makefakecmd as mfc
 import aplpy as aplpy
 from astropy.io import fits
 from astropy import wcs
+import os.path as op
 
 def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], 
                   resultsdir='../Results/', fileextension='',
-                  mergefileroot='merged'):
+                  mergefileroot='merged', show_plots=True):
 
     savefilelist = ['ir-sf-b02-v8-st', 'ir-sf-b04-v8-st', 'ir-sf-b05-v8-st', 
                     'ir-sf-b06-v8-st', 'ir-sf-b08-v8-st', 'ir-sf-b09-v8-st', 
@@ -168,20 +170,22 @@ def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'],
           dec_bins = dec_global,
           savefilelist = savefilelist)
 
-    plt.figure(6)
-    plt.clf()
-    plt.imshow(bestfit_values[::-1,::-1,1].T,vmin=0,vmax=4,cmap='hot')
+    if (show_plots):
 
-    plt.figure(7)
-    plt.clf()
-    im = plt.imshow(bestfit_values_clean[::-1,::-1,1].T,vmin=0,vmax=4,cmap='hot')
-    plt.colorbar(im)
-    
-    plt.figure(8)
-    plt.clf()
-    im = plt.imshow(bestfit_values_clean[::-1,::-1,0].T,vmin=0,vmax=1,cmap='seismic')
-    plt.colorbar(im)
-
+        plt.figure(6)
+        plt.clf()
+        plt.imshow(bestfit_values[::-1,::-1,1].T,vmin=0,vmax=4,cmap='hot')
+        
+        plt.figure(7)
+        plt.clf()
+        im = plt.imshow(bestfit_values_clean[::-1,::-1,1].T,vmin=0,vmax=4,cmap='hot')
+        plt.colorbar(im)
+        
+        plt.figure(8)
+        plt.clf()
+        im = plt.imshow(bestfit_values_clean[::-1,::-1,0].T,vmin=0,vmax=1,cmap='seismic')
+        plt.colorbar(im)
+        
     mfc.plot_bestfit_results(results_file = mergefile, brickname=mergefileroot, pngroot=pngfileroot)
 
     return bestfit_values, percentile_values, quality_values, bad_pix_mask, bestfit_values_clean
@@ -1076,7 +1080,7 @@ def get_draine_at_lowAV(ratiofix = 2.3):
     plt.suptitle('Mean RGB color')
 
 def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
-                             cleanstr = '_clean', imgexten='.png'):
+                             cleanstr = '_clean', imgexten='.png', AVlim=0.5):
 
     drainefile = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.AV.fits'
     draineresolution = 24.9   # FWHM
@@ -1087,6 +1091,9 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     output_smooth_meanAV_file = output_smooth_meanAV_root + '.fits'
     output_chi2_AV_file = output_smooth_AV_root + '.AV_chi2' + imgexten
     output_chi2_meanAV_file = output_smooth_AV_root + '.meanAV_chi2' + imgexten
+    output_ratio_2_f_lgn_grid_file = output_smooth_meanAV_root + '.ratioAV2.0.flgngrid' + imgexten
+    output_ratio_05_f_lgn_grid_file = output_smooth_meanAV_root + '.ratioAV0.5.flgngrid' + imgexten
+    output_offset_05_f_lgn_grid_file = output_smooth_meanAV_root + '.offsetAV0.5.flgngrid' + imgexten
         
     # median extinction
     arrayname = 'bestfit_values' + cleanstr
@@ -1109,11 +1116,35 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
                                            arraynum=arraynum)
     meanAV = a
 
+    # reddening fraction
+    arrayname = 'bestfit_values' + cleanstr
+    arraynum = 0
+    fred, ra_bins, dec_bins = interleave_maps(fileroot=fileroot, resultsdir=resultsdir,
+                                              arrayname=arrayname, 
+                                              arraynum=arraynum)
+    AV = a
+
     # mask indicating no data regions for original input
 
     maskorig = np.where(AV > 0, 1.0, 0.0)
 
     # run the smoothing algorithm on both A_V maps
+
+    if (not op.isfile(output_smooth_AV_file)):  # check if file exists; if not, make it
+        wcs, im_coords, draineimg, AV_img = compare_img_to_AV(AV, ra_bins, dec_bins, drainefile, 
+                                                           crop='False',
+                                                           scaleimgfactor = 1.0,
+                                                           resolution_in_arcsec=draineresolution, 
+                                                           AV_resolution_in_arcsec=AVresolution, 
+                                                           outputAVfile=output_smooth_AV_file)
+
+    if (not op.isfile(output_smooth_meanAV_file)):  # check if file exists; if not, make it
+        wcs, im_coords, draineimg, AV_img = compare_img_to_AV(meanAV, ra_bins, dec_bins, drainefile, 
+                                                           crop='False',
+                                                           scaleimgfactor = 1.0,
+                                                           resolution_in_arcsec=draineresolution, 
+                                                           AV_resolution_in_arcsec=AVresolution, 
+                                                           outputAVfile=output_smooth_meanAV_file)
 
     # read from existing files
     print 'Opening existing smoothed images ', output_smooth_AV_file,' and ',output_smooth_meanAV_file
@@ -1155,8 +1186,7 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
 
     # set minimum AV to use in the fit
 
-    AVlim = 0.5
-
+    print 'Using minimum analysis AV of ', AVlim
     i_good = np.where(AV_img > AVlim)
 
     # Estimate uncertainty in ratio at each A_V
@@ -1241,6 +1271,8 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     minRglobal, minbiasglobal = Rvec[i_minchi2[1][0]], biasvec[i_minchi2[0][0]]
 
     print 'Best Fit for whole distribution using median AV: ',minRglobal, minbiasglobal
+    minRglobal_median = minRglobal
+    minbiasglobal_median = minbiasglobal
     
     print 'Plotting Global Chi2'
 
@@ -1285,6 +1317,9 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     minRglobal, minbiasglobal = Rvec[i_minchi2[1][0]], biasvec[i_minchi2[0][0]]
 
     print 'Best Fit for whole distribution using mean AV: ',minRglobal, minbiasglobal
+    minRglobal_mean = minRglobal
+    minbiasglobal_mean = minbiasglobal
+    
     
     print 'Plotting Global Chi2'
 
@@ -1307,11 +1342,364 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
                      xycoords = 'axes fraction')
     plt.savefig(output_chi2_meanAV_file, bbox_inches=0)
 
+    # set up info to analyze bias as a function of both ln-nstar and f_red
+
+    lgnstar = np.log10(iAV.get_nstar_at_ra_dec(ra, dec, renormalize_to_surfdens=True))
+    f_red_model_pa = 37.0
+    f_red_model_incl = 78.0
+    f_red_model_hz_over_hr = 0.15             # needed to calculate model of f_red
+    f_red_array = get_model_frac_red(ra, dec,
+                                     pa = f_red_model_pa,
+                                     inclination = f_red_model_incl,
+                                     hz_over_hr = f_red_model_hz_over_hr,
+                                     make_plot=False)
+
+    nlgnstarbins = 7
+    nfredbins = 10
+    lgnstarvec = np.linspace(-1.15, 0.25, nlgnstarbins + 1)
+    #fredgrid = np.linspace(0.15, 0.85, 8)
+    fredvec = np.linspace(0.125, 0.875, nfredbins + 1)
+
+    chi2array = np.zeros((nbias, nR, nfredbins, nlgnstarbins))
+    minRvec = np.zeros((nfredbins, nlgnstarbins))
+    minbiasvec = np.zeros((nfredbins, nlgnstarbins))
+    maxAVvec = np.zeros((nfredbins, nlgnstarbins))
+
+    nsubimagepix = 40.
+    AVsubimgbins = np.linspace(0,4,nsubimagepix+1)
+    AVcorrimg = np.zeros((nfredbins*nsubimagepix, nlgnstarbins*nsubimagepix))
+    lgAVcorrplotrange=[-2,0.1]
+
+    for k in np.arange(nlgnstarbins):
+        for l in np.arange(nfredbins):
+
+            i_keep = np.where((lgnstarvec[k] < lgnstar) &
+                              (lgnstar <= lgnstarvec[k+1]) &
+                              (fredvec[l] < f_red_array) &
+                              (f_red_array <= fredvec[l+1]) &
+                              (AV_img > AVlim))
+
+            chi2tmp = np.zeros((nbias, nR))
+
+            if (len(i_keep[0]) > 0):
+
+                for i, R in enumerate(Rvec):
+            
+                    for j, bias in enumerate(biasvec):
+                
+                        diff = meanAVratio[i_keep] - R*(1. + bias/meanAV_img[i_keep])
+                        chi2 = (diff / meanAVratiodispersion[i_keep])**2
+                
+                        chi2tmp[j, i] = np.sum(chi2) / len(chi2)
+                        chi2array[j, i, l, k] = np.sum(chi2) / len(chi2)
+                    
+                minchi2 = np.min(chi2tmp)
+                i_minchi2 = np.where(chi2tmp == minchi2)   # there's a way to do this with np.argmin...
+                minR, minbias = Rvec[i_minchi2[1][0]], biasvec[i_minchi2[0][0]]
+                minRvec[l, k] = minR
+                minbiasvec[l, k] = minbias
+                maxAVvec[l, k] = np.max(AV_img[i_keep])
+                print 'Best Fit for lgn, fred ',lgnstarvec[k],fredvec[l],' is ',minR, minbias
+
+                # make subimage plot of AV correlation
+                y = meanAV_img[i_keep]
+                x = draineimg[i_keep] / minRglobal_mean
+                hist, xedge, yedge = np.histogram2d(x,y,bins=AVsubimgbins)
+                xstart = l*nsubimagepix
+                ystart = k*nsubimagepix
+                print 'nhist: ', len(x), np.sum(hist), ' means: ', np.mean(x), np.mean(y), 'hist.shape: ', hist.shape, ' xstart: ',xstart,' ystart: ',ystart
+                hist /= np.max(hist)
+                # mark diagonal
+                hist[np.arange(nsubimagepix, dtype='int'),
+                     np.arange(nsubimagepix, dtype='int')] = 10.0**lgAVcorrplotrange[1]
+                AVcorrimg[xstart:xstart+nsubimagepix, 
+                          ystart:ystart+nsubimagepix] = hist
+
+            else:
+
+                minRvec[l, k] = -666.
+                minbiasvec[l, k] = -666.
+                print 'No data in fitting range for lgn, fred ',lgnstarvec[k],fredvec[l]
+
+    AVref2 = 2.5
+    AVref05 = 0.5
+    R_2_global  = minRglobal_mean * (1. + minbiasglobal_mean / AVref2)
+    R_05_global = minRglobal_mean * (1. + minbiasglobal_mean / AVref05)
+    R_2_img   = minRvec * (1. + minbiasvec / AVref2)
+    R_05_img = minRvec * (1. + minbiasvec / AVref05)
+    R_2_img[(minRvec < -10) | (maxAVvec < 1.5)] = -666
+    R_05_img[(minRvec < -10) | (maxAVvec < 0.75)] = -666
+
+    Rdiff_2_img = R_2_img - R_2_global
+    Rdiff_05_img = R_05_img - R_05_global
+
+    AVoff_05_img = AVref05 * ((R_05_img/R_2_img) - 1.0)
+    AVoff_05_img[(minRvec < -10) | (maxAVvec < 1.5)] = -666
+
+    #----------
+    plotfigsize = (10.0,10.0)
+    plt.figure(16, figsize=plotfigsize)
+    plt.close()
+    plt.figure(16, figsize=plotfigsize)
+    plt.clf()
+
+    rangevec = [np.min(lgnstarvec),np.max(lgnstarvec),
+                np.min(fredvec),np.max(fredvec)]
+    im = plt.imshow(np.log10(AVcorrimg), interpolation='nearest',
+                    vmin=lgAVcorrplotrange[0], vmax=lgAVcorrplotrange[1], aspect='auto', 
+                    extent=rangevec, origin='lower',
+                    cmap = 'gist_heat_r')
+    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.ylabel('$f_{red}$')
+    plt.axis(rangevec)
+    plt.xticks(lgnstarvec)
+    plt.yticks(fredvec)
+    plt.grid(True)
+    #cb = plt.colorbar(im)
+    #cb.set_alpha(1)
+    #cb.ax.set_aspect(50.)
+    #cb.set_label(r'$A_{V,emission} / A_{V,extinction}$ at $A_V=%4.2f$' % AVref2)
+    #cb.set_label(r'$R(A_V=2) - R_{global}(A_V=2)$')
+    #cb.draw_all()
+
+    exten = '.AVcorrfredvslgnstar'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    #----------
+    plotfigsize = (10.0,10.0)
+    plt.figure(17, figsize=plotfigsize)
+    plt.close()
+    plt.figure(17, figsize=plotfigsize)
+    plt.clf()
+
+    rangevec = [np.min(lgnstarvec),np.max(lgnstarvec),
+                np.min(fredvec),np.max(fredvec)]
+    #im = plt.imshow(minRvec, interpolation='nearest',
+    #                vmin=0, vmax=4, aspect='auto', 
+    #                extent=rangevec, origin='lower')
+    im = plt.imshow(R_2_img, interpolation='nearest',
+                    vmin=0, vmax=4, aspect='auto', 
+                    extent=rangevec, origin='lower',
+                    cmap = 'gnuplot')
+    #im = plt.imshow(Rdiff_2_img, interpolation='nearest',
+    #                vmin=-1.5, vmax=1.5, aspect='auto', 
+    #                extent=rangevec, origin='lower',
+    #                cmap = 'seismic')
+    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.ylabel('$f_{red}$')
+    plt.axis(rangevec)
+    plt.xticks(lgnstarvec)
+    plt.yticks(fredvec)
+    plt.grid(True)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label(r'$A_{V,emission} / A_{V,extinction}$ at $A_V=%4.2f$' % AVref2)
+    #cb.set_label(r'$R(A_V=2) - R_{global}(A_V=2)$')
+    cb.draw_all()
+    plt.savefig(output_ratio_2_f_lgn_grid_file, bbox_inches=0)
+
+    #----------
+    plotfigsize = (10.0,10.0)
+    plt.figure(18, figsize=plotfigsize)
+    plt.close()
+    plt.figure(18, figsize=plotfigsize)
+    plt.clf()
+
+    rangevec = [np.min(lgnstarvec),np.max(lgnstarvec),
+                np.min(fredvec),np.max(fredvec)]
+    #im = plt.imshow(minRvec, interpolation='nearest',
+    #                vmin=0, vmax=4, aspect='auto', 
+    #                extent=rangevec, origin='lower')
+    im = plt.imshow(R_05_img, interpolation='nearest',
+                    vmin=0, vmax=4, aspect='auto', 
+                    extent=rangevec, origin='lower',
+                    cmap = 'gnuplot')
+    #im = plt.imshow(Rdiff_2_img, interpolation='nearest',
+    #                vmin=-1.5, vmax=1.5, aspect='auto', 
+    #                extent=rangevec, origin='lower',
+    #                cmap = 'seismic')
+    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.ylabel('$f_{red}$')
+    plt.axis(rangevec)
+    plt.xticks(lgnstarvec)
+    plt.yticks(fredvec)
+    plt.grid(True)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label(r'$A_{V,emission} / A_{V,extinction}$ at $A_V=%4.2f$' % AVref05)
+    #cb.set_label(r'$R(A_V=2) - R_{global}(A_V=2)$')
+    cb.draw_all()
+    plt.savefig(output_ratio_05_f_lgn_grid_file, bbox_inches=0)
+
+    #----------
+    plotfigsize = (10.0,10.0)
+    plt.figure(19, figsize=plotfigsize)
+    plt.close()
+    plt.figure(19, figsize=plotfigsize)
+    plt.clf()
+
+    rangevec = [np.min(lgnstarvec),np.max(lgnstarvec),
+                np.min(fredvec),np.max(fredvec)]
+    #im = plt.imshow(minbiasvec, interpolation='nearest',
+    #                vmin=0, vmax=1.5, aspect='auto', 
+    #                extent=rangevec, origin='lower')
+    im = plt.imshow(AVoff_05_img, interpolation='nearest',
+                    vmin=-0.2, vmax=0.8, aspect='auto', 
+                    extent=rangevec, origin='lower',
+                    cmap = 'gnuplot')
+    #im = plt.imshow(Rdiff_05_img, interpolation='nearest',
+    #                vmin=-1.5, vmax=1.5, aspect='auto', 
+    #                extent=rangevec, origin='lower',
+    #                cmap = 'seismic')
+    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.ylabel('$f_{red}$')
+    plt.axis(rangevec)
+    plt.xticks(lgnstarvec)
+    plt.yticks(fredvec)
+    plt.grid(True)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    #cb.set_label(r'$A_V({\rm extinction}) {\rm Bias} $')
+    cb.set_label(r'$\Delta A_V \equiv A_{V,emission,corr} - A_{V,extinction}$ at $A_V=%4.2f$' % AVref05)
+    #cb.set_label(r'$R(A_V=0.5) - R_{global}(A_V=0.5)$')
+    cb.draw_all()
+    plt.savefig(output_offset_05_f_lgn_grid_file, bbox_inches=0)
+
+    #----------
+    plt.figure(20, figsize=plotfigsize)
+    plt.close()
+    plt.figure(20, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(lgnstar[i_good], f_red_array[i_good], c=meanAV_img[i_good],
+                     cmap='gnuplot', vmin=0, vmax=4, 
+                     linewidth=0, s=6, alpha=1.0)
+    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.ylabel('$f_{red}$')
+    plt.axis(rangevec)
+    plt.xticks(lgnstarvec)
+    plt.yticks(fredvec)
+    plt.grid(True)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label(r'$\langle A_V \rangle$ (extinction)')
+    cb.draw_all()
+    
+    exten = '.fredvslgnstar'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    #----------
+    plt.figure(21, figsize=plotfigsize)
+    plt.close()
+    plt.figure(21, figsize=plotfigsize)
+    plt.clf()
+
+    radecrange = [12., 10.5, 41.1, 42.4]
+    radecmask = ((ra < radecrange[0]) & (ra > radecrange[1]) & 
+                 (dec < radecrange[3]) & (dec > radecrange[2]))
+    radecmask.shape
+
+    im = plt.scatter(ra[i_good], dec[i_good], c=f_red_array[i_good],
+                     cmap='gnuplot', vmin=0.1, vmax=0.9, 
+                     linewidth=0, s=6, alpha=1.0)
+    plt.rc('contour', negative_linestyle='solid')
+    print 'fredvec: ', fredvec
+    print 'lgnstarvec: ', lgnstarvec
+    cs = plt.contour(f_red_array, levels=fredvec, origin='lower', linewidths=0.5,
+                     extent=[np.max(ra), np.min(ra), np.min(dec), np.max(dec)], 
+                     colors='black', linestyle='solid')
+    cs = plt.contour(lgnstar, levels=lgnstarvec, origin='lower', linewidths=2,
+                     extent=[np.max(ra), np.min(ra), np.min(dec), np.max(dec)], 
+                     colors='black', linestyle='solid')
+    plt.xlabel('RA (degrees)')
+    plt.ylabel('Dec (degrees)')
+    plt.axis(radecrange)
+    plt.grid(True)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label('$f_{red}$')
+    cb.draw_all()
+    
+    exten = '.fredmap'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    #----------
+    plt.figure(23, figsize=plotfigsize)
+    plt.close()
+    plt.figure(23, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(ra[i_good], dec[i_good], c=meanAV_img[i_good],
+                     cmap='gnuplot', vmin=0, vmax=4.0, 
+                     linewidth=0, s=4, alpha=1.0)
+    plt.rc('contour', negative_linestyle='solid')
+    print 'fredvec: ', fredvec
+    print 'lgnstarvec: ', lgnstarvec
+    cs = plt.contour(f_red_array, levels=fredvec, origin='lower', linewidths=0.5,
+                     extent=[np.max(ra), np.min(ra), np.min(dec), np.max(dec)], 
+                     colors='black', linestyle='solid')
+    cs = plt.contour(lgnstar, levels=lgnstarvec, origin='lower', linewidths=2,
+                     extent=[np.max(ra), np.min(ra), np.min(dec), np.max(dec)], 
+                     colors='black', linestyle='solid')
+    plt.xlabel('RA (degrees)')
+    plt.ylabel('Dec (degrees)')
+    plt.axis(radecrange)
+    plt.grid(True)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label(r'$\langle A_V \rangle$ (extinction)')
+    cb.draw_all()
+    
+    exten = '.meanAVmapfredlgnstarcontours'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    #----------
+    plt.figure(22, figsize=plotfigsize)
+    plt.close()
+    plt.figure(22, figsize=plotfigsize)
+    plt.clf()
+
+    im = plt.scatter(ra[i_good], dec[i_good], c=lgnstar[i_good],
+                     cmap='gnuplot', vmin=-1.15, vmax=0.25, 
+                     linewidth=0, s=6, alpha=1.0)
+    cs = plt.contour(f_red_array, fredvec, origin='lower', linewidths=2,
+                     extent=[np.max(ra), np.min(ra), np.min(dec), np.max(dec)], colors='black')
+    plt.xlabel('RA (degrees)')
+    plt.ylabel('Dec (degrees)')
+    plt.axis(radecrange)
+    plt.grid(True)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label(r'${\rm Log}_{10} N_{star}$')
+    cb.draw_all()
+    
+    exten = '.lgnstarmap'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
     # restore font size
     print 'Restoring original font defaults...'
     plt.rcdefaults()
 
-    
+    return minRvec, minbiasvec, AVcorrimg
+        
+    ###############################
     # set up info to analyze bias as a function of ln-nstar
 
     nlgnstarbins = 16.
@@ -1449,112 +1837,19 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     draineimg_fix = mask * (draineimg / minRglobal)
     meanAVratio_fix = mask * (draineimg_fix / meanAV_img_fix)
 
-    # regenerate smoothed image with debiased input AV maps, for a few different 
-    # smoothing parameters to test if residuals go down.
+    # Scatter plot of ratio, color coded by lg10 Nstar
 
-    test_resolution = 'False'
-    if (test_resolution == 'True'):
-
-        wcs, im_coords, draineimg2, meanAV_img_08 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
-                                                                      crop='True',
-                                                                      scaleimgfactor = 1.0,
-                                                                      resolution_in_arcsec=draineresolution*0.8, 
-                                                                      AV_resolution_in_arcsec=AVresolution, 
-                                                                      outputAVfile='')
-        wcs, im_coords, draineimg2, meanAV_img_09 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
-                                                                      crop='True',
-                                                                      scaleimgfactor = 1.0,
-                                                                      resolution_in_arcsec=draineresolution*0.9, 
-                                                                      AV_resolution_in_arcsec=AVresolution, 
-                                                                      outputAVfile='')
-        wcs, im_coords, draineimg2, meanAV_img_11 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
-                                                                      crop='True',
-                                                                      scaleimgfactor = 1.0,
-                                                                      resolution_in_arcsec=draineresolution*1.1, 
-                                                                      AV_resolution_in_arcsec=AVresolution, 
-                                                                      outputAVfile='')
-        wcs, im_coords, draineimg2, meanAV_img_12 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
-                                                                      crop='True',
-                                                                      scaleimgfactor = 1.0,
-                                                                      resolution_in_arcsec=draineresolution*1.2, 
-                                                                      AV_resolution_in_arcsec=AVresolution, 
-                                                                      outputAVfile='')
-        wcs, im_coords, draineimg2, meanAV_img_13 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
-                                                                      crop='True',
-                                                                      scaleimgfactor = 1.0,
-                                                                      resolution_in_arcsec=draineresolution*1.3, 
-                                                                      AV_resolution_in_arcsec=AVresolution, 
-                                                                      outputAVfile='')
-        wcs, im_coords, draineimg2, meanAV_img_14 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
-                                                                      crop='True',
-                                                                      scaleimgfactor = 1.0,
-                                                                      resolution_in_arcsec=draineresolution*1.4, 
-                                                                      AV_resolution_in_arcsec=AVresolution, 
-                                                                      outputAVfile='')
-        wcs, im_coords, draineimg2, meanAV_img_15 = compare_img_to_AV(meanAV_fix, ra_bins, dec_bins, drainefile, 
-                                                                      crop='True',
-                                                                      scaleimgfactor = 1.0,
-                                                                      resolution_in_arcsec=draineresolution*1.5, 
-                                                                      AV_resolution_in_arcsec=AVresolution, 
-                                                                      outputAVfile='')
-        i_unmasked_orig = i_unmasked
-        mask = np.where(meanAV_img_12 > 0.25, 1.0, 0.0)  # set highish threshold to avoid bias offset
-        i_unmasked = np.where(mask > 0)
-        i_masked = np.where(mask == 0)
-        rat_08 = mask * draineimg2 / meanAV_img_08
-        rat_09 = mask * draineimg2 / meanAV_img_09
-        #rat_10 = np.where(meanAV_img > 0.25, 1.0, 0.0) * draineimg / meanAV_img_fix
-        rat_11 = mask * draineimg2 / meanAV_img_11
-        rat_12 = mask * draineimg2 / meanAV_img_12
-        rat_13 = mask * draineimg2 / meanAV_img_13
-        rat_14 = mask * draineimg2 / meanAV_img_14
-        rat_15 = mask * draineimg2 / meanAV_img_15
-        
-        print ' Smooth Fac     Mean    Median    Stddev  '
-        print '0.8', np.mean(rat_08[i_unmasked]), np.median(rat_08[i_unmasked]), np.std(rat_08[i_unmasked])
-        print '0.9', np.mean(rat_09[i_unmasked]), np.median(rat_09[i_unmasked]), np.std(rat_09[i_unmasked])
-        #print '1.0', np.mean(rat_10[i_unmasked_orig]), np.median(rat_10[i_unmasked_orig]), np.std(rat_10[i_unmasked_orig])
-        print '1.1', np.mean(rat_11[i_unmasked]), np.median(rat_11[i_unmasked]), np.std(rat_11[i_unmasked])
-        print '1.2', np.mean(rat_12[i_unmasked]), np.median(rat_12[i_unmasked]), np.std(rat_12[i_unmasked])
-        print '1.3', np.mean(rat_13[i_unmasked]), np.median(rat_13[i_unmasked]), np.std(rat_13[i_unmasked])
-        print '1.4', np.mean(rat_14[i_unmasked]), np.median(rat_14[i_unmasked]), np.std(rat_14[i_unmasked])
-        print '1.5', np.mean(rat_15[i_unmasked]), np.median(rat_15[i_unmasked]), np.std(rat_15[i_unmasked])
-        
-        plt.figure(8)
-        plt.clf
-        plt.imshow(rat_08 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
-        
-        plt.figure(8)
-        plt.clf
-        plt.imshow(rat_08 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
-        
-        plt.figure(9)
-        plt.clf
-        plt.imshow(rat_09 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
-        
-        plt.figure(10)
-        plt.clf
-        #plt.imshow(rat_10 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
-        
-        plt.figure(11)
-        plt.clf
-        plt.imshow(rat_11 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
-        
-        plt.figure(12)
-        plt.clf
-        plt.imshow(rat_12 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
-        
-        plt.figure(13)
-        plt.clf
-        plt.imshow(rat_13 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
-        
-        plt.figure(14)
-        plt.clf
-        plt.imshow(rat_15 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
-        
-        plt.figure(16)
-        plt.clf
-        plt.imshow(rat_16 / minRglobal, vmin=0, vmax=2, cmap='seismic', interpolation='nearest')
+    plt.figure(21)
+    plt.close()
+    plt.figure(21, figsize=(10,10))
+    im = plt.scatter(meanAV_img[i_good], 
+                     draineimg[i_good] / meanAV_img[i_good], 
+                     c=fred[i_good], 
+                     cmap='jet_r', s=7, linewidth=0, vmin=0, vmax=1)
+    plt.colorbar(im)
+    plt.xlabel(r'$\langle A_V \rangle$')
+    plt.ylabel(r'$A_{V,emission}  /  \langle A_V \rangle$')
+    plt.axis([0, 3.5, 0, 7])
 
     return meanAV_img, draineimg, meanAVratio, meanAV_img_fix, draineimg_fix, meanAVratio_fix
 
@@ -1568,9 +1863,9 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     # shuffling such a large array is too slow!
     #i_hiAV_shuffle = np.array(copy.deepcopy(i_hiAV))
     #random.shuffle(i_hiAV_shuffle)
-    im = plt.scatter(meanAV_img[i_hiAV], 
-                     draineimg[i_hiAV] / meanAV_img[i_hiAV], 
-                     c=lgnstar[i_hiAV], 
+    im = plt.scatter(meanAV_img[i_hi], 
+                     draineimg[i_hi] / meanAV_img[i_hi], 
+                     c=lgnstar[i_hi], 
                      cmap='jet_r', s=7, linewidth=0, vmin=-1.4, vmax=0.4)
     plt.colorbar(im)
     plt.xlabel(r'$\langle A_V \rangle$')
@@ -1607,9 +1902,10 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
 
 def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
                               cleanstr = '_clean', imgexten='.png',
-                              write_fits = 'False', write_ratio_fits = 'True',
-                              biasfix = 0.26, ratiofix=2.37,
-                              biasfixmean = 0.275, ratiofixmean=2.20,
+                              write_fits = False, write_ratio_fits = False,
+                              AVlim = 0.5,
+                              biasfix = 0.185, ratiofix=2.43,
+                              biasfixmean = 0.32, ratiofixmean=2.07,
                               smooth_img=0):
 
     drainefile = '../draine_M31_S350_110_SSS_110_Model_All_SurfBr_Mdust.AV.fits'
@@ -1646,7 +1942,7 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
 
     # run the smoothing algorithm on both A_V maps
 
-    if (write_fits == 'True'):
+    if (write_fits):
 
         wcs, im_coords, draineimg, AV_img = compare_img_to_AV(AV, ra_bins, dec_bins, drainefile, 
                                                               crop='True',
@@ -1695,13 +1991,21 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
     dec = img_coords[:,:,1]
 
     lgnstar = np.log10(iAV.get_nstar_at_ra_dec(ra, dec, renormalize_to_surfdens=True))
+    f_red_model_pa = 37.0
+    f_red_model_incl = 78.0
+    f_red_model_hz_over_hr = 0.15             # needed to calculate model of f_red
+    f_red_array = get_model_frac_red(ra, dec,
+                                     pa = f_red_model_pa,
+                                     inclination = f_red_model_incl,
+                                     hz_over_hr = f_red_model_hz_over_hr,
+                                     make_plot=False)
 
     # select regions for analysis
 
     mask = np.where(AV_img > 0, 1.0, 0.0)
     i_masked = np.where(mask == 0)
     i_unmasked = np.where(mask > 0)
-    mask_loAV = np.where(AV_img > 0.25, 1.0, 0.0)
+    mask_loAV = np.where(AV_img > AVlim, 1.0, 0.0)
     i_loAV = np.where((mask_loAV == 0) & (mask > 0))
     i_hiAV = np.where(mask_loAV > 0)
 
@@ -1717,7 +2021,7 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
 
     # write ratio fits files
 
-    if (write_ratio_fits == 'True'):
+    if (write_ratio_fits):
         print ' Writing ratio maps'
         pyfits.writeto(output_smooth_AV_ratio_file, AVratio, header=hdr)
         pyfits.writeto(output_smooth_meanAV_ratio_file, meanAVratio, header=hdr)
@@ -1726,9 +2030,158 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
 
     # set minimum AV to use in plots
 
-    AVlim = 0.325
+    AVlim = 0.5
 
     i_good = np.where(AV_img > AVlim)
+
+    # Ratio plot AV -- color-coded by fred (ghost out low AV points)
+
+    AVvec = np.linspace(0.001,10,100)
+    ratiovec = ratiofix * (1.0 + biasfix/AVvec)
+
+    # grid of plots 
+
+    alpha = 1.0
+    greyval = '#B3B3B3'
+    plotfigsize = (10.0,10.0)
+
+    plt.figure(15, figsize=plotfigsize)
+    plt.close()
+    plt.figure(15, figsize=plotfigsize)
+    plt.clf()
+    nstep = 9
+    fvec = np.linspace(0.05, 0.85, nstep)
+    for i in np.arange(nstep - 1):
+        plt.subplot(3, 3, i + 1)
+        fmin = fvec[i]
+        fmax = fvec[i+1]
+        i_loAV_f = np.where((mask_loAV == 0) & (mask > 0) & (fmin < f_red_array) & (f_red_array <= fmax))
+        i_hiAV_f = np.where((mask_loAV > 0) & (fmin < f_red_array) & (f_red_array <= fmax))
+        im = plt.plot(AV_img[i_loAV_f], draineimg[i_loAV_f] / AV_img[i_loAV_f], ',', 
+                      color=greyval, alpha=alpha)
+        #im = plt.plot(AV_img[i_hiAV_f], draineimg[i_hiAV_f] / AV_img[i_hiAV_f], ',', 
+        #              color='black', alpha=alpha)
+        im = plt.scatter(AV_img[i_hiAV_f], draineimg[i_hiAV_f] / AV_img[i_hiAV_f], c=lgnstar[i_hiAV_f],
+                      cmap='jet', vmin=-1.3, vmax=0.1, linewidth=0, s=4, alpha=alpha)
+        im = plt.plot([0,4],[1,1], color=greyval)
+        #im = plt.scatter(AV_img[i_hiAV_f], draineimg[i_hiAV_f] / AV_img[i_hiAV_f], c=f_red_array[i_hiAV], 
+        #                 s=1, linewidth=0, alpha=alpha)
+        plt.plot(AVvec, ratiovec, color='red', linewidth=4)
+        plt.xlabel('$\widetilde{A_V}$')
+        plt.ylabel('$A_{V,emission}  /  \widetilde{A_V}$')
+        plt.axis([0, 3.5, 0, 7])
+        plt.annotate(r'$f_{red}$',
+                     xy=(0.80, 0.90), fontsize=10, horizontalalignment='center',
+                     xycoords = 'axes fraction')
+        plt.annotate(r'$[%5.2f, %5.2f]$' % (fmin, fmax),
+                     xy=(0.80, 0.825), fontsize=10, horizontalalignment='center',
+                     xycoords = 'axes fraction')
+
+    plt.subplots_adjust(left=0.1, right=0.825, bottom=0.1, top=0.9, hspace = 0.25, wspace= 0.25)
+    ax = plt.axes([0.85, 0.1, 0.025, 0.8])
+    color_bar = plt.colorbar(cax = ax)
+    color_bar.set_label(r'${\rm Log}_{10} \Sigma_{star}$')
+    color_bar.draw_all()
+    
+    plt.subplot(3, 3, nstep)
+    plt.scatter(ra[i_hiAV], dec[i_hiAV], c=lgnstar[i_hiAV], linewidth=0, 
+                cmap='jet', vmin=-1.3, vmax=0.1, s=4)
+    plt.axis([12., 10.5, 41.1, 42.4])
+    plt.xlabel('RA')
+    plt.ylabel('Dec')
+
+    exten = '.ratiofredgrid'
+    savefile = output_smooth_AV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    plt.figure(16, figsize=plotfigsize)
+    plt.close()
+    plt.figure(16, figsize=plotfigsize)
+    plt.clf()
+    nstep = 9
+    lgnvec = np.linspace(0.1, -1.3, nstep)
+    for i in np.arange(nstep-1):
+        plt.subplot(3, 3, i + 1)
+        fmin = lgnvec[i+1]
+        fmax = lgnvec[i]
+        print i, fmin, fmax
+        i_loAV_f = np.where((mask_loAV == 0) & (mask > 0) & (fmin < lgnstar) & (lgnstar <= fmax))
+        i_hiAV_f = np.where((mask_loAV > 0) & (fmin < lgnstar) & (lgnstar <= fmax))
+        im = plt.plot(AV_img[i_loAV_f], draineimg[i_loAV_f] / AV_img[i_loAV_f], ',', 
+                      color=greyval, alpha=alpha)
+        #im = plt.plot(AV_img[i_hiAV_f], draineimg[i_hiAV_f] / AV_img[i_hiAV_f], ',', 
+        #              color='black', alpha=alpha)
+        im = plt.scatter(AV_img[i_hiAV_f], draineimg[i_hiAV_f] / AV_img[i_hiAV_f], c=f_red_array[i_hiAV_f],
+                      cmap='seismic', vmin=0.1, vmax=0.9, linewidth=0, s=4, alpha=alpha)
+        im = plt.plot([0,4],[1,1], color=greyval)
+        #im = plt.scatter(AV_img[i_hiAV_f], draineimg[i_hiAV_f] / AV_img[i_hiAV_f], c=f_red_array[i_hiAV], 
+        #                 s=1, linewidth=0, alpha=alpha)
+        plt.plot(AVvec, ratiovec, color='red', linewidth=4)
+        plt.xlabel('$\widetilde{A_V}$')
+        plt.ylabel('$A_{V,emission}  /  \widetilde{A_V}$')
+        plt.axis([0, 3.5, 0, 7])
+        plt.annotate(r'${\rm Log}_{10} \Sigma_{star}$',
+                     xy=(0.80, 0.90), fontsize=10, horizontalalignment='center',
+                     xycoords = 'axes fraction')
+        plt.annotate(r'$[%5.2f, %5.2f]$' % (fmin, fmax),
+                     xy=(0.80, 0.825), fontsize=10, horizontalalignment='center',
+                     xycoords = 'axes fraction')
+    
+    plt.subplots_adjust(left=0.1, right=0.825, bottom=0.1, top=0.9, hspace = 0.25, wspace= 0.25)
+    ax = plt.axes([0.85, 0.1, 0.025, 0.8])
+    color_bar = plt.colorbar(cax = ax)
+    color_bar.set_label('$f_{red}$')
+    color_bar.draw_all()
+
+    plt.subplot(3, 3, nstep)
+    plt.scatter(ra[i_hiAV], dec[i_hiAV], c=f_red_array[i_hiAV], s=4, cmap='seismic', 
+                linewidth=0, vmin=0.1, vmax=0.9)
+    plt.axis([12., 10.5, 41.1, 42.4])
+    plt.xlabel('RA')
+    plt.ylabel('Dec')
+
+    plt.subplots_adjust(left=0.1, right=0.825, bottom=0.1, top=0.9, hspace = 0.25, wspace= 0.25)
+    ax = plt.axes([0.85, 0.1, 0.025, 0.8])
+    color_bar = plt.colorbar(cax = ax)
+    color_bar.set_label('$f_{red}$')
+    color_bar.draw_all()
+
+    exten = '.ratiolgngrid'
+    savefile = output_smooth_AV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    #----------
+    plt.figure(17, figsize=plotfigsize)
+    plt.close()
+    plt.figure(17, figsize=plotfigsize)
+    plt.clf()
+
+    lgnstargrid = np.linspace(-1.15, 0.25, 8)
+    #fredgrid = np.linspace(0.15, 0.85, 8)
+    fredgrid = np.linspace(0.125, 0.875, 11)
+    im = plt.scatter(lgnstar[i_good], f_red_array[i_good], c=AV_img[i_good],
+                     cmap='jet', vmin=0.5, vmax=4, 
+                     linewidth=0, s=2, alpha=alpha)
+    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.ylabel('$f_{red}$')
+    plt.axis([-1.3, 0.25, 0.1, 0.9])
+    plt.xticks(lgnstargrid)
+    plt.yticks(fredgrid)
+    plt.grid(True)
+    cb = plt.colorbar(im)
+    cb.set_alpha(1)
+    cb.ax.set_aspect(50.)
+    cb.set_label('$A_V$ (extinction)')
+    cb.draw_all()
+    
+    exten = '.fredvslgnstar'
+    savefile = output_smooth_AV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    return
 
     ################################################
     # Make plots
@@ -4212,7 +4665,7 @@ def plot_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     AVfile = resultsdir + fileroot + '.AV.fits'
     AVerrfile = resultsdir + fileroot + '.AVerr.fits'
     ffile = resultsdir + fileroot + '.fred.fits'
-    ferrfile = resultsdir + fileroot + '.ferr.fits'
+    ferrfile = resultsdir + fileroot + '.frederr.fits'
     output_fred_map_file = resultsdir + fileroot + '.goodfredmap' + imgexten
     output_fred_angle_file = resultsdir + fileroot + '.fredangle' + imgexten
     
@@ -4337,6 +4790,7 @@ def plot_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
 
 def fit_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2, 
                            imgexten='.png', r_range=[0, 1.4],
+                           ptsize = 4, 
                            resultsdir = '../Results/',
                            fileroot = 'merged_interleave'):
 
@@ -4475,7 +4929,7 @@ def fit_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     plt.figure(1)
     plt.close()
     plt.figure(1, figsize=(12,10))
-    im = plt.scatter(ra, dec, c=f, linewidth=0, s=4,
+    im = plt.scatter(ra, dec, c=f, linewidth=0, s=ptsize,
                      vmin=0.1, vmax=0.9)
     color_bar = plt.colorbar(im)
     color_bar.ax.set_aspect(50.)
@@ -4498,7 +4952,7 @@ def fit_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     plt.figure(2)
     plt.close()
     plt.figure(2, figsize=(12,10))
-    im = plt.scatter(ra, dec, c=fmodel, linewidth=0, s=4,
+    im = plt.scatter(ra, dec, c=fmodel, linewidth=0, s=ptsize,
                      vmin=0.1, vmax=0.9)
     color_bar = plt.colorbar(im)
     color_bar.ax.set_aspect(50.)
@@ -4525,7 +4979,7 @@ def fit_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     plt.figure(3)
     plt.close()
     plt.figure(3, figsize=(12,10))
-    im = plt.scatter(ra, dec, c=(f - fmodel), linewidth=0, s=4,
+    im = plt.scatter(ra, dec, c=(f - fmodel), linewidth=0, s=ptsize,
                      vmin=-0.2, vmax=0.2, cmap='seismic')
     color_bar = plt.colorbar(im)
     color_bar.ax.set_aspect(50.)
@@ -4552,7 +5006,7 @@ def fit_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     plt.close()
     plt.figure(4, figsize=(12,10))
     plt.plot([0, 1.5],[0, 0], color='black')
-    im = plt.scatter(r, f-fmodel, c=f, linewidth=0, s=4,
+    im = plt.scatter(r, f-fmodel, c=f, linewidth=0, s=ptsize,
                      vmin=0.1, vmax=0.9)
     color_bar = plt.colorbar(im)
     color_bar.ax.set_aspect(50.)
@@ -4579,7 +5033,7 @@ def fit_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
     plt.close()
     plt.figure(5, figsize=(12,10))
     plt.plot([0, 1],[0, 0], color='black')
-    im = plt.scatter(f, f-fmodel, c=r, linewidth=0, s=4,
+    im = plt.scatter(f, f-fmodel, c=r, linewidth=0, s=ptsize,
                      vmin=0.4, vmax=1.3)
     color_bar = plt.colorbar(im)
     color_bar.ax.set_aspect(50.)
@@ -4609,7 +5063,7 @@ def fit_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
 
     return chi2grid, f, fmodel, ra, dec
 
-def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgexten='.png'):
+def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgexten='.png', sigerrlim=0.3):
 
     resultsfile = resultsdir + resultsfileroot + '.npz'
     imgfile = resultsdir + resultsfileroot + '.AV_sig_vs_MW' + imgexten
@@ -4617,7 +5071,11 @@ def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgext
     
     AV = dat['bestfit_values_clean'][:,:,1].flatten()
     sig = dat['bestfit_values_clean'][:,:,2].flatten()
-    i_good = np.where(AV > 0)
+    sigerr = ((dat['percentile_values'][:,:,8].flatten() - dat['percentile_values'][:,:,6].flatten()) / 2.0) / sig
+    print 'Restricting to delta-sig / sig < ', sigerrlim
+    i_pos = np.where((AV > 0))
+    i_good = np.where((AV > 0) & (sigerr < sigerrlim))
+    print 'Cutting from ', len(i_pos[0]), ' to ', len(i_good[0])
 
     # Data from Table 2 of Lombardi, Alves, & Lada 2010, but original
     # from Kainailanen et al 2009 -- MW molecular clouds
@@ -4653,7 +5111,7 @@ def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgext
 
     AVrange = [0.,5.]
     sigrange = [0., 1.]
-    nbins = [100, 100]
+    nbins = [25, 25]
     hist, sigedge, AVedge = np.histogram2d(sig[i_good], AV[i_good], normed=True, 
                                            range=[sigrange, AVrange], 
                                            bins=nbins)
@@ -4669,8 +5127,11 @@ def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgext
     plt.figure(1)
     plt.close()
     plt.figure(1, figsize=(10,9))
-    im = plt.imshow(np.log10(hist), vmin=-3, vmax=0.5, aspect='auto', 
+    im = plt.imshow(np.log10(hist), vmin=-1.5, vmax=0.5, aspect='auto', 
                     extent=extentvec, origin='lower', cmap='gray_r', interpolation='nearest')
+    plt.annotate(r'$\Delta\sigma / \sigma < %4.2f$' % sigerrlim,
+                     xy=(0.95, 0.9), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
     #plt.colorbar(im)
     plt.xlabel('$A_V$')
     plt.ylabel('$\sigma$')
@@ -4704,7 +5165,7 @@ def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgext
 
 def plot_final_totgas_compare(fileroot='merged', resultsdir='../Results/',
                               cleanstr = '_clean', imgexten='.png',
-                              write_fits = 'False', write_ratio_fits = 'True',
+                              write_fits = False, write_ratio_fits = True,
                               gasimgscale = 1.8e21,
                               biasfix = 0.26, ratiofix=1.0,
                               biasfixmean = 0.275, ratiofixmean=1.0,
@@ -4744,7 +5205,7 @@ def plot_final_totgas_compare(fileroot='merged', resultsdir='../Results/',
 
     # run the smoothing algorithm on both A_V maps
 
-    if (write_fits == 'True'):
+    if (write_fits == True):
 
         wcs, im_coords, gasimg, AV_img = compare_img_to_AV(AV, ra_bins, dec_bins, gasfile, 
                                                            crop='True',
@@ -4821,7 +5282,7 @@ def plot_final_totgas_compare(fileroot='merged', resultsdir='../Results/',
 
     # write ratio fits files
 
-    if (write_ratio_fits == 'True'):
+    if (write_ratio_fits == True):
         print ' Writing ratio maps'
         pyfits.writeto(output_smooth_AV_ratio_file, AVratio, header=hdr)
         pyfits.writeto(output_smooth_meanAV_ratio_file, meanAVratio, header=hdr)
@@ -4830,7 +5291,7 @@ def plot_final_totgas_compare(fileroot='merged', resultsdir='../Results/',
 
     # set minimum AV to use in plots
 
-    AVlim = 0.325
+    AVlim = 0.5
 
     i_good = np.where(AV_img > AVlim)
 
@@ -5310,6 +5771,87 @@ def plot_final_totgas_compare(fileroot='merged', resultsdir='../Results/',
     print 'Saving correlation plot to ', savefile
     plt.savefig(savefile, bbox_inches=0)
 
+    # plot grid of correlations in fred vs lgnstar
+
+    lgnstar = np.log10(iAV.get_nstar_at_ra_dec(ra, dec, renormalize_to_surfdens=True))
+    f_red_model_pa = 37.0
+    f_red_model_incl = 78.0
+    f_red_model_hz_over_hr = 0.15             # needed to calculate model of f_red
+    f_red_array = get_model_frac_red(ra, dec,
+                                     pa = f_red_model_pa,
+                                     inclination = f_red_model_incl,
+                                     hz_over_hr = f_red_model_hz_over_hr,
+                                     make_plot=False)
+
+    nlgnstarbins = 7
+    nfredbins = 10
+    lgnstarvec = np.linspace(-1.15, 0.25, nlgnstarbins + 1)
+    fredvec = np.linspace(0.125, 0.875, nfredbins + 1)
+
+    nsubimagepix = 40.
+    AVsubimgbins = np.linspace(0,4,nsubimagepix+1)
+    AVcorrimg = np.zeros((nfredbins*nsubimagepix, nlgnstarbins*nsubimagepix))
+    lgAVcorrplotrange=[-2,0.1]
+
+    for k in np.arange(nlgnstarbins):
+        for l in np.arange(nfredbins):
+
+            i_keep = np.where((lgnstarvec[k] < lgnstar) &
+                              (lgnstar <= lgnstarvec[k+1]) &
+                              (fredvec[l] < f_red_array) &
+                              (f_red_array <= fredvec[l+1]) &
+                              (AV_img > AVlim))
+
+            if (len(i_keep[0]) > 0):
+
+                # make subimage plot of AV correlation
+                y = meanAV_img[i_keep]
+                x = gasimg[i_keep]
+                hist, xedge, yedge = np.histogram2d(x,y,bins=AVsubimgbins)
+                xstart = l*nsubimagepix
+                ystart = k*nsubimagepix
+                print 'nhist: ', len(x), np.sum(hist), ' means: ', np.mean(x), np.mean(y), 'hist.shape: ', hist.shape, ' xstart: ',xstart,' ystart: ',ystart
+                hist /= np.max(hist)
+                # mark diagonal
+                hist[np.arange(nsubimagepix, dtype='int'),
+                     np.arange(nsubimagepix, dtype='int')] = 10.0**lgAVcorrplotrange[1]
+                AVcorrimg[xstart:xstart+nsubimagepix, 
+                          ystart:ystart+nsubimagepix] = hist
+
+    #----------
+    plotfigsize = (10.0,10.0)
+    plt.figure(16, figsize=plotfigsize)
+    plt.close()
+    plt.figure(16, figsize=plotfigsize)
+    plt.clf()
+
+    rangevec = [np.min(lgnstarvec),np.max(lgnstarvec),
+                np.min(fredvec),np.max(fredvec)]
+    im = plt.imshow(np.log10(AVcorrimg), interpolation='nearest',
+                    vmin=lgAVcorrplotrange[0], vmax=lgAVcorrplotrange[1], aspect='auto', 
+                    extent=rangevec, origin='lower',
+                    cmap = myblues)
+                    #cmap = 'gist_heat_r')
+    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.ylabel('$f_{red}$')
+    plt.axis(rangevec)
+    plt.xticks(lgnstarvec)
+    plt.yticks(fredvec)
+    plt.grid(True)
+    #cb = plt.colorbar(im)
+    #cb.set_alpha(1)
+    #cb.ax.set_aspect(50.)
+    #cb.set_label(r'$A_{V,emission} / A_{V,extinction}$ at $A_V=%4.2f$' % AVref2)
+    #cb.set_label(r'$R(A_V=2) - R_{global}(A_V=2)$')
+    #cb.draw_all()
+
+    exten = '.AVcorrfredvslgnstar'
+    savefile = output_smooth_meanAV_root + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+
+
     # restore font size
 
     print 'Restoring original font defaults...'
@@ -5317,4 +5859,170 @@ def plot_final_totgas_compare(fileroot='merged', resultsdir='../Results/',
 
     return
 
+def plot_priors(fileroot='priormap', resultsdir='../Results/', 
+                imgexten='.png'):
+
+    nx = 100
+    AVmeshvec = np.linspace(0.001, 2, nx)
+    sigmeshvec = np.linspace(0.001, 1., nx)
+
+    fpriorvec = [0.15, 0.2, 0.5, 0.8]
+
+    for fprior_use in fpriorvec:
+
+        fvec = np.linspace(0.025, 0.975, nx)
+        alpha = np.log(fprior_use) / np.log(0.5)
+        xvec = np.log(fvec**(1.0/alpha) / (1.0 - fvec**(1.0/alpha)))
+        xpriorval = np.log(fprior_use**(1.0/alpha) / 
+                           (1.0 - fprior_use**(1.0/alpha)))
+        
+        AVgrid, xgrid = np.meshgrid(AVmeshvec, xvec)
+        lnpgrid = np.zeros(AVgrid.shape)
+        lnpsiggrid = np.zeros(AVgrid.shape)
+        
+        # set up ln_priors function
+
+        ln_priors = mfc.lnpriorobj(fprior_use)
+
+        for j in range(len(AVmeshvec)):
+            for i in range(len(xvec)):
+
+                lnpgrid[i, j] = ln_priors([xvec[i],AVmeshvec[j],0.4])
+                lnpsiggrid[i, j] = ln_priors([xpriorval,1.5,sigmeshvec[i]])
+
+        rangevec = [np.min(AVmeshvec), np.max(AVmeshvec), 
+                    np.min(fvec), np.max(fvec)]
+        rangesigvec = [np.min(AVmeshvec), np.max(AVmeshvec), 
+                       np.min(sigmeshvec), np.max(sigmeshvec)]
+    
+        print 'Increasing font size...'
+    
+        font = {'weight': '500',
+                'size': '18'}
+        plt.rc('font', **font)
+        plotfigsize = (9.0, 7.0)
+        
+        plt.figure(3, figsize=plotfigsize)
+        plt.close()
+        plt.figure(3, figsize=plotfigsize)
+        
+        lnpmax = np.max(lnpgrid)
+        lnprange = 1.0
+        lnprange = 2.0
+        im = plt.imshow(lnpgrid, vmin = lnpmax - lnprange, vmax=lnpmax, 
+                        aspect='auto', origin='lower',
+                        extent=rangevec, cmap='gist_heat_r')
+        plt.xlabel('$A_V$')
+        plt.ylabel('$f_{red}$')
+        cb = plt.colorbar(im)
+        cb.ax.set_aspect(50.)
+        cb.set_label('ln(Prior)')
+        cb.draw_all()
+
+        exten = '.fred.%4.2f' % fprior_use
+        savefile = resultsdir + fileroot + exten + imgexten
+        print 'Saving correlation plot to ', savefile
+        plt.savefig(savefile, bbox_inches=0)
+
+
+    plt.figure(4, figsize=plotfigsize)
+    plt.close()
+    plt.figure(4, figsize=plotfigsize)
+
+    lnpmax = np.max(lnpsiggrid)
+    lnprange = 1.0
+    im = plt.imshow(lnpsiggrid, vmin = lnpmax - lnprange, vmax=lnpmax, 
+                    aspect='auto', origin='lower',
+                    extent=rangesigvec, cmap='gist_heat_r')
+    plt.xlabel('$A_V$')
+    plt.ylabel('$\sigma$')
+    cb = plt.colorbar(im)
+    cb.ax.set_aspect(50.)
+    cb.set_label('ln(Prior)')
+    cb.draw_all()
+
+    exten = '.sigma'
+    savefile = resultsdir + fileroot + exten + imgexten
+    print 'Saving correlation plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    # restore font size
+
+    print 'Restoring original font defaults...'
+    plt.rcdefaults()
+    
+    return
+    
+
+def make_paper_figs():
+
+    makeinterleaved_fits(fileroot='ir-sf-b15-v8-st', cleanstr='')
+    makeinterleaved_fits(fileroot='ir-sf-b16-v8-st', cleanstr='')
+    makeinterleaved_fits(fileroot='ir-sf-b17-v8-st', cleanstr='')
+
+    plot_final_brick_example(fileroot='ir-sf-b15-v8-st')
+    plot_final_brick_example(fileroot='ir-sf-b16-v8-st')
+    plot_final_brick_example(fileroot='ir-sf-b17-v8-st')
+
+    plot_optical_comparison_images()
+    plot_draine_comparison_images()
+
+    return
+
+# custom colormap, based on http://li248-5.members.linode.com/
+# using implementation from http://wiki.scipy.org/Cookbook/Matplotlib/Show_colormaps
+
+# blues that goes to black at the end
+cdict = {'red': ((0.0,  1.0,  1.0),
+                 (0.25, 0.25, 0.25),
+                 (0.5,  0.0,  0.0),
+                 (0.75, 0.0,  0.0),
+                 (1.0,  0.0,  0.0)),
+         'green': ((0.0,  1.0,   1.0),
+                   (0.25, 1.0,   1.0),
+                   (0.5,  0.625, 0.625),
+                   (0.75, 0.25,  0.25),
+                   (1.0,  0.0,   0.0)),
+         'blue': ((0.0,  1.0,  1.0),
+                  (0.25, 1.0,  1.0),
+                  (0.5,  1.0,  1.0),
+                  (0.75, 0.9,  0.9),
+                  (0.95, 0.25,  0.25),
+                  (1.0,  0.0,  0.0))}
+myblues = colors.LinearSegmentedColormap('my_colormap',cdict,256)
+plt.figure(1)
+rndfield = np.random.rand(10,10)
+im = plt.pcolor(rndfield, cmap=myblues)
+plt.colorbar(im)
+
+# alternate seismic that goes to black at the edges
+cdict = {'red': ((0.0,  0.0,  0.0),
+                 (0.15, 0.0,  0.0),
+                 #(0.25, 0.0,  0.0),
+                 (0.5,  1.0,  1.0),
+                 (0.75, 1.0,  1.0),
+                 (0.95, 0.5,  0.5),
+                 (1.0,  0.0,  0.0)),
+         'green': ((0.0,  0.0,   0.0),
+                   #(0.25, 0.0,   0.0),
+                   (0.15, 0.0,   0.0),
+                   (0.5,  1.0,   1.0),
+                   (0.85, 0.0,   0.0),
+                   #(0.75, 0.0,   0.0),
+                   (1.0,  0.0,   0.0)),
+         'blue': ((0.0,  0.0,  0.0),
+                  (0.05,  0.5,  0.5),
+                  (0.25, 1.0,  1.0),
+                  (0.5,  1.0,  1.0),
+                  #(0.75, 0.0,  0.0),
+                  (0.85, 0.0,  0.0),
+                  (1.0,  0.0,  0.0))}
+myseismic = colors.LinearSegmentedColormap('my_colormap',cdict,256)
+plt.figure(2)
+im = plt.pcolor(rndfield, cmap=myseismic)
+plt.colorbar(im)
+
+plt.figure(3)
+im = plt.pcolor(rndfield, cmap='seismic')
+plt.colorbar(im)
 
