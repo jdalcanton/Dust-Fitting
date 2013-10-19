@@ -22,6 +22,7 @@ import makefakecmd as mfc
 import aplpy as aplpy
 from astropy.io import fits
 from astropy import wcs
+import os as os
 import os.path as op
 
 def merge_results(savefilelist=['ir-sf-b14-v8-st.npz', 'newfit_test.npz'], 
@@ -868,6 +869,13 @@ def compare_overlaps(datafile = 'ir-sf-b12-v8-st.fits',
 
 def make_fits_image(fitsfilename, array, rabins, decbins, badval=-666, replaceval=0):
 
+    # notes on corner vs edges: 
+    # http://www.ucolick.org/~sla/fits/mosaic/lickwcs.html
+    #
+    #  center of pixel = integer
+    #  edge of pixel = half-integer
+    #  first pixel = 1st image pixel
+
     f = pyfits.PrimaryHDU(data = array.T)
     hdr = f.header
     print 'Array: ', array.shape
@@ -878,13 +886,13 @@ def make_fits_image(fitsfilename, array, rabins, decbins, badval=-666, replaceva
     if (badval != ''):
         array = np.where(array == badval, replaceval, array)
 
-    # default M31 parameters (from generate_global_ra_dec_grid)
-    m31ra  = 10.6847929
-    m31dec = 41.2690650    # use as tangent point
+    ## default M31 parameters (from generate_global_ra_dec_grid)
+    #m31ra  = 10.6847929
+    #m31dec = 41.2690650    # use as tangent point
 
-    # delta-degrees
-    dra = (rabins[1] - rabins[0]) * np.cos(np.math.pi * m31dec / 180.0)
-    ddec = decbins[1] - decbins[0]
+    ## delta-degrees
+    #dra = (rabins[1] - rabins[0]) * np.cos(np.math.pi * m31dec / 180.0)
+    #ddec = decbins[1] - decbins[0]
 
     # middle of the image
     m31ra_mid = (rabins[-1] + rabins[0]) / 2.0
@@ -1004,7 +1012,7 @@ def get_draine_at_lowAV(ratiofix = 2.3):
     plt.figure(1)
     plt.clf()
     plt.plot(np.log10(nstar), loAV, ',', color='blue')
-    plt.xlabel(r'$\log_{10}N_{star}$')
+    plt.xlabel(r'$\log_{10}\Sigma_{stars}$')
     plt.ylabel('$A_{V,emission}$')
 
     plt.figure(2)
@@ -1016,7 +1024,7 @@ def get_draine_at_lowAV(ratiofix = 2.3):
     plt.figure(3)
     plt.clf()
     plt.plot(np.log10(nstar), loAV / ratiofix, ',', color='blue')
-    plt.xlabel(r'$\log_{10}N_{star}$')
+    plt.xlabel(r'$\log_{10}\Sigma_{stars}$')
     plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
 
     plt.figure(4)
@@ -1043,7 +1051,7 @@ def get_draine_at_lowAV(ratiofix = 2.3):
     plt.clf()
     im = plt.scatter(np.log10(nstarall), loAVall / ratiofix, c=cstdall, s=7, linewidth=0, alpha=0.4, vmin=0.02, vmax=0.15)
     plt.colorbar(im)
-    plt.xlabel(r'$\log_{10}N_{star}$')
+    plt.xlabel(r'$\log_{10}\Sigma_{stars}$')
     plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
     plt.suptitle('RGB Width')
 
@@ -1059,7 +1067,7 @@ def get_draine_at_lowAV(ratiofix = 2.3):
     plt.clf()
     im = plt.scatter(np.log10(nstarall), loAVall / ratiofix, c=cmeanall, s=7, linewidth=0, alpha=0.4, vmin=-0.1, vmax=0.01)
     plt.colorbar(im)
-    plt.xlabel(r'$\log_{10}N_{star}$')
+    plt.xlabel(r'$\log_{10}\Sigma_{stars}$')
     plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
     plt.suptitle('Mean RGB color')
 
@@ -1075,7 +1083,7 @@ def get_draine_at_lowAV(ratiofix = 2.3):
     plt.clf()
     im = plt.scatter(np.log10(nstar), loAV / ratiofix, c=cmean, s=7, linewidth=0, alpha=1.0, vmin=-0.1, vmax=0.01)
     plt.colorbar(im)
-    plt.xlabel(r'$\log_{10}N_{star}$')
+    plt.xlabel(r'$\log_{10}\Sigma_{stars}$')
     plt.ylabel('$A_{V,emission} / %4.2f$' % ratiofix)
     plt.suptitle('Mean RGB color')
 
@@ -1449,7 +1457,7 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
                     vmin=lgAVcorrplotrange[0], vmax=lgAVcorrplotrange[1], aspect='auto', 
                     extent=rangevec, origin='lower',
                     cmap = 'gist_heat_r')
-    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.xlabel(r'${\rm Log}_{10} \Sigma_{stars}$')
     plt.ylabel('$f_{red}$')
     plt.axis(rangevec)
     plt.xticks(lgnstarvec)
@@ -1487,7 +1495,7 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     #                vmin=-1.5, vmax=1.5, aspect='auto', 
     #                extent=rangevec, origin='lower',
     #                cmap = 'seismic')
-    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.xlabel(r'${\rm Log}_{10} \Sigma_{stars}$')
     plt.ylabel('$f_{red}$')
     plt.axis(rangevec)
     plt.xticks(lgnstarvec)
@@ -1521,7 +1529,7 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     #                vmin=-1.5, vmax=1.5, aspect='auto', 
     #                extent=rangevec, origin='lower',
     #                cmap = 'seismic')
-    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.xlabel(r'${\rm Log}_{10} \Sigma_{stars}$')
     plt.ylabel('$f_{red}$')
     plt.axis(rangevec)
     plt.xticks(lgnstarvec)
@@ -1555,7 +1563,7 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     #                vmin=-1.5, vmax=1.5, aspect='auto', 
     #                extent=rangevec, origin='lower',
     #                cmap = 'seismic')
-    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.xlabel(r'${\rm Log}_{10} \Sigma_{stars}$')
     plt.ylabel('$f_{red}$')
     plt.axis(rangevec)
     plt.xticks(lgnstarvec)
@@ -1579,7 +1587,7 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     im = plt.scatter(lgnstar[i_good], f_red_array[i_good], c=meanAV_img[i_good],
                      cmap='gnuplot', vmin=0, vmax=4, 
                      linewidth=0, s=6, alpha=1.0)
-    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.xlabel(r'${\rm Log}_{10} \Sigma_{stars}$')
     plt.ylabel('$f_{red}$')
     plt.axis(rangevec)
     plt.xticks(lgnstarvec)
@@ -1685,7 +1693,7 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     cb = plt.colorbar(im)
     cb.set_alpha(1)
     cb.ax.set_aspect(50.)
-    cb.set_label(r'${\rm Log}_{10} N_{star}$')
+    cb.set_label(r'${\rm Log}_{10} \Sigma_{stars}$')
     cb.draw_all()
     
     exten = '.lgnstarmap'
@@ -1769,7 +1777,7 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
         plt.plot(minRglobal, minbiasglobal, '*', markersize=20, color='red')
         plt.plot(minRvec[i], minbiasvec[i], '*', markersize=20, color='white')
 
-        plt.annotate(r'$\log_{10} N_{star} = %5.2f$' % lgnstarvec[i], 
+        plt.annotate(r'$\log_{10} \Sigma_{stars} = %5.2f$' % lgnstarvec[i], 
                      xy=(0.95, 0.90), fontsize=10, horizontalalignment='right',
                      xycoords = 'axes fraction')
 
@@ -1801,7 +1809,7 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
         plt.plot(AVvec, (1. + minbiasvec[i]/AVvec) * minRvec[i], color='red', )
         plt.plot(AVvec, 2.4 + 0.0*AVvec, color='green')
         plt.axis([0, 1.025*max(meanAV_img[i_keep]), 0, 7])
-        plt.annotate(r'$\log_{10} N_{star} = %5.2f$' % lgnstarvec[i], 
+        plt.annotate(r'$\log_{10} \Sigma_{stars} = %5.2f$' % lgnstarvec[i], 
                      xy=(0.95, 0.90), fontsize=10, horizontalalignment='right',
                      xycoords = 'axes fraction')
         plt.annotate(r'${\rm Bias} = %4.2f$' % minbiasvec[i], 
@@ -1817,7 +1825,7 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     plt.close()
     plt.figure(6, figsize=(10,10))
     plt.plot(lgnstarvec, minbiasvec)
-    plt.xlabel(r'$\log_{10} N_{star}$')
+    plt.xlabel(r'$\log_{10} \Sigma_{stars}$')
     plt.ylabel('Bias')
 
     print 'Plotting Figure 7'
@@ -1825,7 +1833,7 @@ def derive_draine_bias_ratio(fileroot='merged', resultsdir='../Results/',
     plt.close()
     plt.figure(7, figsize=(10,10))
     plt.plot(lgnstarvec, minRvec)
-    plt.xlabel(r'$\log_{10} N_{star}$')
+    plt.xlabel(r'$\log_{10} \Sigma_{stars}$')
     plt.ylabel('Ratio')
 
     # adjust images by the global solutions
@@ -2164,7 +2172,7 @@ def plot_final_draine_compare(fileroot='merged', resultsdir='../Results/',
     im = plt.scatter(lgnstar[i_good], f_red_array[i_good], c=AV_img[i_good],
                      cmap='jet', vmin=0.5, vmax=4, 
                      linewidth=0, s=2, alpha=alpha)
-    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.xlabel(r'${\rm Log}_{10} \Sigma_{stars}$')
     plt.ylabel('$f_{red}$')
     plt.axis([-1.3, 0.25, 0.1, 0.9])
     plt.xticks(lgnstargrid)
@@ -3254,9 +3262,9 @@ def plot_pixel_demo(fileroot = 'demo_modelfit_data_7_63'):
     plt.axis([crange[0],crange[1],qrange[1],qrange[0]])
     plt.xlabel('F110W - F160W')
     plt.ylabel('Extinction Corrected F160W')
-    plt.annotate(r'$A_{V,median} = %4.2f$' % bestfit[1], xy=(2.4, 19.5), fontsize=17,horizontalalignment='right')
-    plt.annotate(r'$\sigma = %4.2f$' % sigma, xy=(2.4, 20.0), fontsize=17,horizontalalignment='right')
-    plt.annotate(r'$f_{reddened} = %4.2f$' % f, xy=(2.4, 20.5), fontsize=17,horizontalalignment='right')
+    plt.annotate(r'$A_{V,median} = %4.2f$' % bestfit[1], xy=(3.2, 19.5), fontsize=17,horizontalalignment='right')
+    plt.annotate(r'$\sigma = %4.2f$' % sigma, xy=(3.2, 20.0), fontsize=17,horizontalalignment='right')
+    plt.annotate(r'$f_{reddened} = %4.2f$' % f, xy=(3.2, 20.5), fontsize=17,horizontalalignment='right')
     plt.savefig(fileroot + '_reddened_w_data.png')
 
     # plot banana diagrams
@@ -3269,10 +3277,18 @@ def plot_pixel_demo(fileroot = 'demo_modelfit_data_7_63'):
     plt.ylabel('$f_{reddened}$')
     plt.savefig(fileroot + '_AV_fred.png')
 
+    meanAVmin, meanAVmax = 0.0, 4.0
+    sigmamin, sigmamax = 0.0, 1.0
+    nbinssigma, nbinsmeanAV = 25, 40
+    hist, sigmaedges, meanAVedges = np.histogram2d(sigmavec, meanAVvec,
+                                                   range=[[sigmamin, sigmamax], [meanAVmin, meanAVmax]],
+                                                   bins = [nbinssigma, nbinsmeanAV])
     
     plt.figure(6)
     plt.clf()
-    plt.plot(meanAVvec, sigmavec, ',', alpha=0.2, c='b')
+    #plt.plot(meanAVvec, sigmavec, ',', alpha=0.2, c='b')
+    plt.imshow(hist, extent=[meanAVmin, meanAVmax, sigmamin, sigmamax], 
+               cmap='gist_heat_r', origin='lower', aspect='auto')
     plt.axis([0, 4, 0, 1])
     plt.xlabel('Mean $A_V$')
     plt.ylabel('$\sigma$')
@@ -4251,13 +4267,32 @@ def plot_final_brick_example(fileroot = 'ir-sf-b16-v8-st',
     plt.figure(3, figsize=plotfigsize)
     plt.clf()
 
+    im = plt.scatter(AV, AVerr/AV, c=fred, s=7, linewidth=0, 
+                     alpha=scatteralpha,  cmap='jet_r',
+                     vmin=0, vmax=np.max(fred))
+    plt.colorbar(im)
+    plt.xlabel('$\widetilde{A_V}$')
+    plt.ylabel('$\Delta\widetilde{A_V} / \widetilde{A_V}$')
+    plt.axis([0, 5, 0, 1.5])
+    plt.annotate(r"$f_{red}$",xy=(0.9,0.9), xycoords='axes fraction', 
+                 xytext=None, horizontalalignment='right', verticalalignment='top')
+    
+    exten = '.AV_vs_AVfracerr_fred_color'
+    savefile = resultsdir + fileroot + '_interleave' + exten + imgexten
+    print 'Saving scatter plot to ', savefile
+    plt.savefig(savefile, bbox_inches=0)
+
+    ######
+    plt.figure(3, figsize=plotfigsize)
+    plt.clf()
+
     im = plt.scatter(AV, frederr, c=nstars, s=7, linewidth=0, 
                      alpha=scatteralpha,  cmap='jet_r',
                      vmin=25, vmax=125)
     plt.colorbar(im)
     plt.xlabel('$\widetilde{A_V}$')
     plt.ylabel('$\Delta f_{red}$')
-    plt.axis([0, 5, 0, 0.5])
+    plt.axis([0, 5, 0, 0.25])
     plt.annotate(r"$N_{stars}$",xy=(0.9,0.9), xycoords='axes fraction', 
                  xytext=None, horizontalalignment='right', verticalalignment='top')
     
@@ -4276,7 +4311,7 @@ def plot_final_brick_example(fileroot = 'ir-sf-b16-v8-st',
     plt.colorbar(im)
     plt.xlabel('$\widetilde{A_V}$')
     plt.ylabel('$\Delta f_{red}$')
-    plt.axis([0, 5, 0, 0.5])
+    plt.axis([0, 5, 0, 0.25])
     plt.annotate(r"Log ${\mathcal{L}}$",xy=(0.9,0.9), xycoords='axes fraction', 
                  xytext=None, horizontalalignment='right', verticalalignment='top')
     
@@ -5063,34 +5098,34 @@ def fit_fred_distributions(AVthresh=1.5, AVfracerrthresh=0.15, ferrthresh=0.2,
 
     return chi2grid, f, fmodel, ra, dec
 
-def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgexten='.png', sigerrlim=0.3):
+def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgexten='.png', 
+                      sigerrlimmin=0.0, sigerrlimmax=0.08, 
+                      AVfracerrlim=0.1, use_meanAV=True,
+                      nbacklim = 35.):
 
-    resultsfile = resultsdir + resultsfileroot + '.npz'
-    imgfile = resultsdir + resultsfileroot + '.AV_sig_vs_MW' + imgexten
-    dat = np.load(resultsfile)
-    
-    AV = dat['bestfit_values_clean'][:,:,1].flatten()
-    sig = dat['bestfit_values_clean'][:,:,2].flatten()
-    sigerr = ((dat['percentile_values'][:,:,8].flatten() - dat['percentile_values'][:,:,6].flatten()) / 2.0) / sig
-    print 'Restricting to delta-sig / sig < ', sigerrlim
-    i_pos = np.where((AV > 0))
-    i_good = np.where((AV > 0) & (sigerr < sigerrlim))
-    print 'Cutting from ', len(i_pos[0]), ' to ', len(i_good[0])
+    imgfile = resultsdir + resultsfileroot + '.AV_sig_vs_MW_%4.2f_%4.2f' % (sigerrlimmin, sigerrlimmax) + imgexten
 
     # Data from Table 2 of Lombardi, Alves, & Lada 2010, but original
     # from Kainailanen et al 2009 -- MW molecular clouds
     #
     # see milkywayMC.dat
 
-    AK_MW  = np.array([0.15, 0.38, 0.18, 0.08, 0.16, 0.33, 0.11, 0.12, 
+    AKmedian_MW  = np.array([0.15, 0.38, 0.18, 0.08, 0.16, 0.33, 0.11, 0.12, 
                        0.14, 0.10, 0.12, 0.42, 0.10, 0.14, 0.12, 0.15, 
                        0.08, 0.12, 0.13, 0.13, 0.11, 0.16, 0.14])
     AK_AV = 0.112
-    AV_MW = AK_MW / AK_AV
+    AVmedian_MW = AKmedian_MW / AK_AV
 
     sig_MW = np.array([0.42, 0.28, 0.49, 0.43, 0.48, 0.51, 0.35, 0.35, 
                        0.35, 0.44, 0.32, 0.29, 0.39, 0.41, 0.38, 0.50, 
                        0.45, 0.46, 0.50, 0.48, 0.49, 0.59, 0.51])
+
+    # calculate mean
+    AVmean_MW = AVmedian_MW * np.exp(sig_MW**2 / 2.0)
+    if (use_meanAV):
+        AV_MW = AVmean_MW
+    else:
+        AV_MW = AVmedian_MW
 
     SF_MW  = np.array([0, 0, 1, 1, 1, 1, 1, 1, 
                        1, 1, 1, 1, 1, 1, 1, 0, 
@@ -5109,32 +5144,131 @@ def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgext
     i_noSF_lores = np.where((SF_MW == 0) & (resolution_MW == 0.6))
     i_noSF_hires = np.where((SF_MW == 0) & (resolution_MW == 0.1))
 
-    AVrange = [0.,5.]
-    sigrange = [0., 1.]
+    #resultsfile = resultsdir + resultsfileroot + '.npz'
+    #dat = np.load(resultsfile)
+    #AV = dat['bestfit_values_clean'][:,:,1].flatten()
+    ##AV = dat['derived_values_clean'][:,:,0].flatten()
+    #sig = dat['bestfit_values_clean'][:,:,2].flatten()
+    #sigerr = ((dat['percentile_values'][:,:,8].flatten() - dat['percentile_values'][:,:,6].flatten()) / 2.0) / sig
+
+    medianAV, ra, dec = interleave_maps(fileroot=resultsfileroot, 
+                                        arrayname='bestfit_values_clean',
+                                        arraynum=1)
+    meanAV, ra, dec = interleave_maps(fileroot=resultsfileroot, 
+                                      arrayname='dervied_values_clean',
+                                      arraynum=0)
+    sig, ra, dec = interleave_maps(fileroot=resultsfileroot, 
+                                  arrayname='bestfit_values_clean',
+                                  arraynum=2)
+    shi, ra, dec = interleave_maps(fileroot=resultsfileroot, 
+                                  arrayname='percentile_values',
+                                  arraynum=8)
+    slo, ra, dec = interleave_maps(fileroot=resultsfileroot, 
+                                  arrayname='percentile_values',
+                                  arraynum=6)
+    ahi, ra, dec = interleave_maps(fileroot=resultsfileroot, 
+                                  arrayname='percentile_values',
+                                  arraynum=2)
+    alo, ra, dec = interleave_maps(fileroot=resultsfileroot, 
+                                  arrayname='percentile_values',
+                                  arraynum=0)
+    nstar, ra, dec = interleave_maps(fileroot=resultsfileroot, 
+                                     arrayname='quality_values',
+                                     arraynum=1)
+    fred, ra, dec = interleave_maps(fileroot=resultsfileroot, 
+                                    arrayname='bestfit_values_clean',
+                                    arraynum=0)
+    racen  = (ra[1:] + ra[:-1]) / 2.0
+    deccen = (dec[1:] + dec[:-1]) / 2.0
+    decarray, raarray = np.meshgrid(deccen, racen)
+    fred_geom = get_model_frac_red(raarray, decarray)
+    ffill = fred / fred_geom
+
+    nback = nstar * fred
+
+    #sigerr = ((shi - slo) / 2.0) / sig
+    sigerrlo = (sig - slo)
+    sigerrhi = (shi - sig)
+    sigerr = (shi - slo) / 2.0
+    AVerr  = (ahi - alo) / 2.0
+    AVfracerr = AVerr / medianAV
+
+    AV = medianAV
+    AVstring = r'$\widetilde{A_V}$'
+    if (use_meanAV):
+        AV = meanAV
+        AVstring = r'$\langle A_V \rangle$'
+
+
+    #print 'Restricting to delta-sig / sig < ', sigerrlim
+    print 'Restricting to delta-sig > ', sigerrlimmin
+    print 'Restricting to delta-sig < ', sigerrlimmax
+    i_pos = np.where((AV > 0))
+    #i_good = np.where((AV > 0) & (sigerr < sigerrlim))
+    i_good = np.where((AV > 0) & 
+                      (sigerr > sigerrlimmin) & (sigerr <= sigerrlimmax) & 
+                      (AVfracerr < AVfracerrlim) &
+                      (nback > nbacklim))
+    i_ffill = np.where((AV > 0) & 
+                       (AVfracerr < AVfracerrlim) &
+                       (nback > nbacklim))
+    print 'Cutting from ', len(i_pos[0]), ' to ', len(i_good[0])
+    print 'Fraction left: ', float(len(i_good[0])) / float(len(i_pos[0])), ' to ', 
+    print 'Mean sigma error of remaining: ', np.mean(sigerr[i_good])
+    print 'Median sigma error of remaining: ', np.median(sigerr[i_good])
+
+    # get typical skew in sigma error distribution
+    sigerrmean = np.mean(sigerr[i_good])
+    sigerrmedian = np.median(sigerr[i_good])
+    sigerrhifracmean = np.mean(sigerrhi[i_good] / sigerr[i_good])
+    sigerrhifracmedian = np.median(sigerrhi[i_good] / sigerr[i_good])
+    sigerrlofracmean = np.mean(sigerrlo[i_good] / sigerr[i_good])
+    sigerrlofracmedian = np.median(sigerrlo[i_good] / sigerr[i_good])
+
     nbins = [25, 25]
+    AVrange = [0.,5.]
+    #sigrange = [0., 1.]
+    sigrange = [0., 1.]
     hist, sigedge, AVedge = np.histogram2d(sig[i_good], AV[i_good], normed=True, 
                                            range=[sigrange, AVrange], 
                                            bins=nbins)
     extentvec = [AVedge[0], AVedge[-1], sigedge[0], sigedge[-1]]
 
+    #sigrange = [0., 1.]
+    ffillrange = [0., 2.0]
+    ffillhist, ffilledge, AVedge = np.histogram2d(ffill[i_ffill], AV[i_ffill], normed=True, 
+                                           range=[ffillrange, AVrange], 
+                                           bins=nbins)
+    ffillextentvec = [AVedge[0], AVedge[-1], ffilledge[0], ffilledge[-1]]
+
     # make nicer output
     print 'Increasing font size...'
     font = {'weight': '500',
-            'size': '18'}
+            'size': '20'}
     plt.rc('font', **font)
 
     # plot distributions
     plt.figure(1)
     plt.close()
-    plt.figure(1, figsize=(10,9))
+    plt.figure(1, figsize=(8,9))
     im = plt.imshow(np.log10(hist), vmin=-1.5, vmax=0.5, aspect='auto', 
                     extent=extentvec, origin='lower', cmap='gray_r', interpolation='nearest')
-    plt.annotate(r'$\Delta\sigma / \sigma < %4.2f$' % sigerrlim,
+    #plt.annotate(r'$\Delta\sigma / \sigma < %4.2f$' % sigerrlim,
+    #plt.annotate(r'$\Delta\sigma < %4.2f$' % sigerrlim,
+    plt.annotate(r'$%4.2f < \Delta\sigma < %4.2f$' % (sigerrlimmin, sigerrlimmax),
                      xy=(0.95, 0.9), fontsize=20, horizontalalignment='right',
                      xycoords = 'axes fraction')
     #plt.colorbar(im)
-    plt.xlabel('$A_V$')
+    plt.xlabel(AVstring)
     plt.ylabel('$\sigma$')
+
+    # plot prior and error
+    greyval = '#B3B3B3'
+    plt.plot([0,5],[0.3,0.3],color=greyval,linewidth=1)
+    #plt.plot([0.3, 0.3], [0.3 * (1.0-sigerrlim), 0.3 * (1.0+sigerrlim)], color='black', linewidth=5) 
+    plt.plot([0.2, 0.2], [0.3 - sigerrmedian*sigerrlofracmedian, 0.3 + sigerrmedian*sigerrhifracmedian], color='black', linewidth=5) 
+
+    # plot MW points
     plt.plot(AV_MW[i_SF_lores], sig_MW[i_SF_lores], '*', color='red', 
              ms=18, markeredgewidth=1)
     plt.plot(AV_MW[i_noSF_lores], sig_MW[i_noSF_lores], 'o', color='red', 
@@ -5143,21 +5277,38 @@ def plot_AV_sig_vs_MW(resultsfileroot='merged', resultsdir='../Results/', imgext
              ms=18, markeredgewidth=1)
     plt.plot(AV_MW[i_noSF_hires], sig_MW[i_noSF_hires], 'o', color='cyan', 
              ms=10, markeredgewidth=1)
+
     print 'Saving plot to ' + imgfile
     plt.savefig(imgfile, bbox_inches=0)
 
-    # plot distributions
-    plt.figure(2)
+    # plot ffill distributions
+    plt.figure(3)
     plt.close()
-    plt.figure(2, figsize=(10,9))
-    plt.plot(AV, sig, ',', alpha=0.1, color='black')
-    plt.axis(extentvec)
-    plt.xlabel('$A_V$')
-    plt.ylabel('$\sigma$')
-    plt.plot(AV_MW[i_SF_lores], sig_MW[i_SF_lores], '*', color='red', ms=15)
-    plt.plot(AV_MW[i_noSF_lores], sig_MW[i_noSF_lores], 'o', color='red', ms=10)
-    plt.plot(AV_MW[i_SF_hires], sig_MW[i_SF_hires], '*', color='blue', ms=15)
-    plt.plot(AV_MW[i_noSF_hires], sig_MW[i_noSF_hires], 'o', color='blue', ms=10)
+    plt.figure(3, figsize=(8,9))
+    im = plt.imshow(np.log10(ffillhist), vmin=-1.5, vmax=0.5, aspect='auto', 
+                    extent=ffillextentvec, origin='lower', cmap='gray_r', interpolation='nearest')
+    #plt.annotate(r'$\Delta\sigma / \sigma < %4.2f$' % sigerrlim,
+    #plt.annotate(r'$\Delta\sigma < %4.2f$' % sigerrlim,
+    plt.annotate(r'$%4.2f < \Delta\sigma < %4.2f$' % (sigerrlimmin, sigerrlimmax),
+                     xy=(0.95, 0.9), fontsize=20, horizontalalignment='right',
+                     xycoords = 'axes fraction')
+    #plt.colorbar(im)
+    plt.xlabel(AVstring)
+    plt.ylabel('$f_{fill}$')
+
+    # plot distributions
+    #plt.figure(2)
+    #plt.close()
+    #plt.figure(2, figsize=(10,9))
+    #plt.plot(AV, sig, ',', alpha=0.1, color='red')
+    #plt.plot(AV[i_good], sig[i_good], ',', alpha=0.2, color='black')
+    #plt.axis(extentvec)
+    #plt.xlabel(AVstring)
+    #plt.ylabel('$\sigma$')
+    #plt.plot(AV_MW[i_SF_lores], sig_MW[i_SF_lores], '*', color='red', ms=15)
+    #plt.plot(AV_MW[i_noSF_lores], sig_MW[i_noSF_lores], 'o', color='red', ms=10)
+    #plt.plot(AV_MW[i_SF_hires], sig_MW[i_SF_hires], '*', color='blue', ms=15)
+    #plt.plot(AV_MW[i_noSF_hires], sig_MW[i_noSF_hires], 'o', color='blue', ms=10)
 
     # restore font size
     print 'Restoring original font defaults...'
@@ -5167,8 +5318,8 @@ def plot_final_totgas_compare(fileroot='merged', resultsdir='../Results/',
                               cleanstr = '_clean', imgexten='.png',
                               write_fits = False, write_ratio_fits = True,
                               gasimgscale = 1.8e21,
-                              biasfix = 0.26, ratiofix=1.0,
-                              biasfixmean = 0.275, ratiofixmean=1.0,
+                              biasfix = 0.18, ratiofix=1.0,
+                              biasfixmean = 0.32, ratiofixmean=1.0,
                               smooth_img=0):
 
     gasfile = '../GasMaps/working/tg_old_wsrt_at_45.fits'  # in atoms / cm^2
@@ -5832,7 +5983,7 @@ def plot_final_totgas_compare(fileroot='merged', resultsdir='../Results/',
                     extent=rangevec, origin='lower',
                     cmap = myblues)
                     #cmap = 'gist_heat_r')
-    plt.xlabel(r'${\rm Log}_{10} N_{star}$')
+    plt.xlabel(r'${\rm Log}_{10} \Sigma_{stars}$')
     plt.ylabel('$f_{red}$')
     plt.axis(rangevec)
     plt.xticks(lgnstarvec)
@@ -5969,6 +6120,631 @@ def make_paper_figs():
 
     return
 
+def make_orion_fig(plot_stars=True, n_sample_per_box=25., imgexten='.png',
+                   write_fits=True):
+
+    orion_file = '../Orion_from_412pc_to_745kpc_in_M31.fits'
+
+    # define 6.645" analysis box
+    boxarcsec = 6.645
+    boxdegrees = boxarcsec / 3600.
+
+    racen = 11.2300
+    deccen = 41.8850
+    ddec = boxdegrees
+    dra = ddec/np.cos(deccen*np.pi/180.)
+
+    #---------------------------
+    # Read in orion fits file, break into regions, calculate stats
+    
+    f = pyfits.open(orion_file)
+    hdr, img = f[0].header, f[0].data
+    wcs = pywcs.WCS(hdr)
+
+    # make grid of RA and Dec at each pixel
+    i_dec, i_ra = np.meshgrid(np.arange(img.shape[1]), np.arange(img.shape[0]))
+    if (wcs.wcs.naxis == 2):
+        i_coords = np.array([[i_dec[i,j],i_ra[i,j]] for (i,j),val in np.ndenumerate(i_ra)])
+    if (wcs.wcs.naxis == 3):
+        i_coords = np.array([[i_dec[i,j],i_ra[i,j],0] for (i,j),val in np.ndenumerate(i_ra)])
+    print 'img.shape: ', img.shape
+    print 'i_dec.shape: ', i_dec.shape
+    print 'i_coords.shape: ', i_coords.shape
+
+    # solve for RA, dec at those coords
+    img_coords = wcs.wcs_pix2sky(i_coords, 1)
+    if (wcs.wcs.naxis > 2):
+        img_coords = img_coords[:,0:2]
+    img_coords = np.reshape(img_coords,(i_ra.shape[0],i_ra.shape[1],2))
+    ra_img  = img_coords[:,:,0]
+    dec_img = img_coords[:,:,1]
+    print 'ra_img.shape:', ra_img.shape
+
+    ramin, ramax = np.min(ra_img), np.max(ra_img)
+    decmin, decmax = np.min(dec_img), np.max(dec_img)
+
+    rabins = np.arange(ramin, ramax+dra, dra)
+    decbins = np.arange(decmin, decmax+dra, ddec)
+
+    # tweak rabins and decbins to line up with APLPY grid lines.
+    # Total hack, but what you gonna do?
+    ratweak = ((ramax - ramin) / 3.2) * 0.059
+    ratweak = ((ramax - ramin) / 3.2) * 0.095
+    dectweak = -((decmax - decmin) / 5.6) * 0.27
+    rabins = rabins + ratweak
+    decbins = decbins + dectweak
+
+    rashifts  = [0., 0.5, 0.0, 0.5]
+    decshifts = [0., 0.0, 0.5, 0.5]
+
+    # prepare arrays to hold output maps
+    medianmap = np.zeros((len(decbins)-1, len(rabins)-1, 4))
+    meanmap = np.zeros(medianmap.shape)
+    stddevmap = np.zeros(medianmap.shape)
+    sigmamap = np.zeros(medianmap.shape)
+
+    mediansamplemap = np.zeros((len(decbins)-1, len(rabins)-1, 4))
+    meansamplemap = np.zeros(medianmap.shape)
+    stddevsamplemap = np.zeros(medianmap.shape)
+    sigmasamplemap = np.zeros(medianmap.shape)
+
+    # prepare list of random samples with appropriate density
+    nsamp = n_sample_per_box * medianmap.shape[0] * medianmap.shape[1]
+    ravec = ra_img[np.where(img > 0)]
+    decvec = dec_img[np.where(img > 0)]
+    AVvec = img[np.where(img > 0)]
+    i = np.arange(0,len(AVvec))
+    i_samp = np.random.choice(i, nsamp)
+    AVsamp = AVvec[i_samp]
+    rasamp = ravec[i_samp]
+    decsamp = decvec[i_samp]
+
+    nAVbins=50
+    AVbins=np.linspace(0.,10.,nAVbins+1)
+    AVbincen = (AVbins[1:] + AVbins[:-1]) / 2.0
+    AVhistmap = np.zeros((len(decbins)-1, len(rabins)-1, nAVbins))
+    AVcumemap = np.zeros((len(decbins)-1, len(rabins)-1, nAVbins))
+
+    plt.figure(1)
+    for j in np.arange(len(rashifts)):
+        for j_ra in np.arange(len(rabins[:-1])):
+            for j_dec in np.arange(len(decbins[:-1])):
+                AVvec = img[np.where((ra_img > rabins[j_ra] + rashifts[j]*dra) & 
+                                     (ra_img < rabins[j_ra + 1] + rashifts[j]*dra) &
+                                     (dec_img > decbins[j_dec] + decshifts[j]*ddec) & 
+                                     (dec_img < decbins[j_dec + 1] + decshifts[j]*ddec) &
+                                     (img > 0))]
+                mean = np.mean(AVvec)
+                median = np.median(AVvec)
+                sigma1 = 2.0 * np.log(mean/median)
+                meanmap[j_dec, j_ra, j] = mean
+                medianmap[j_dec, j_ra, j] = median
+                stddevmap[j_dec, j_ra, j] = np.std(AVvec)
+                sigmamap[j_dec, j_ra, j] = sigma1
+                if (len(AVvec) <= 2):
+                    meanmap[j_dec, j_ra, j] = 0.0
+                    medianmap[j_dec, j_ra, j] = 0.0
+                    stddevmap[j_dec, j_ra, j] = 0.0
+                    sigmamap[j_dec, j_ra, j] = 0.0
+
+                # in one of the shifts, save histograms of AV values in bins
+                if (j==0) & (len(AVvec) > 100):
+                    AVhist, b = np.histogram(AVvec, bins=AVbins, density=True)
+                    AVcume = AVhist.cumsum() * (b[1] - b[0])
+                    #print 'len(AVhist): ', AVhist.shape
+                    #print 'len(AVbins): ', AVbins.shape
+                    #print 'len(AVbincen): ', AVbincen.shape
+                    AVhistmap[j_dec, j_ra, :] = AVhist
+                    AVcumemap[j_dec, j_ra, :] = AVcume
+                    plt.plot(AVbincen, AVhist)
+                
+                # redo with sampling from AVvec
+
+                AVvec = AVsamp[np.where((rasamp > rabins[j_ra] + rashifts[j]*dra) & 
+                                     (rasamp < rabins[j_ra + 1] + rashifts[j]*dra) &
+                                     (decsamp > decbins[j_dec] + decshifts[j]*ddec) & 
+                                     (decsamp < decbins[j_dec + 1] + decshifts[j]*ddec) &
+                                     (AVsamp > 0))]
+                mean = np.mean(AVvec)
+                median = np.median(AVvec)
+                sigma1 = 2.0 * np.log(mean/median)
+                meansamplemap[j_dec, j_ra, j] = mean
+                mediansamplemap[j_dec, j_ra, j] = median
+                stddevsamplemap[j_dec, j_ra, j] = np.std(AVvec)
+                sigmasamplemap[j_dec, j_ra, j] = sigma1
+                if (len(AVvec) <= 2):
+                    meansamplemap[j_dec, j_ra, j] = 0.0
+                    mediansamplemap[j_dec, j_ra, j] = 0.0
+                    stddevsamplemap[j_dec, j_ra, j] = 0.0
+                    sigmasamplemap[j_dec, j_ra, j] = 0.0
+                
+    # merge maps
+
+    medianinterleave = np.zeros((2.0*(len(decbins)-1), 2.0*(len(rabins)-1)))
+    medianinterleave[::2,::2]=medianmap[:,:,0]
+    medianinterleave[::2,1::2]=medianmap[:,:,1]
+    medianinterleave[1::2,::2]=medianmap[:,:,2]
+    medianinterleave[1::2,1::2]=medianmap[:,:,3]
+
+    meaninterleave = np.zeros((2.0*(len(decbins)-1), 2.0*(len(rabins)-1)))
+    meaninterleave[::2,::2]=meanmap[:,:,0]
+    meaninterleave[::2,1::2]=meanmap[:,:,1]
+    meaninterleave[1::2,::2]=meanmap[:,:,2]
+    meaninterleave[1::2,1::2]=meanmap[:,:,3]
+
+    sigmainterleave = np.zeros((2.0*(len(decbins)-1), 2.0*(len(rabins)-1)))
+    sigmainterleave[::2,::2]=sigmamap[:,:,0]
+    sigmainterleave[::2,1::2]=sigmamap[:,:,1]
+    sigmainterleave[1::2,::2]=sigmamap[:,:,2]
+    sigmainterleave[1::2,1::2]=sigmamap[:,:,3]
+
+    mediansampleinterleave = np.zeros((2.0*(len(decbins)-1), 2.0*(len(rabins)-1)))
+    mediansampleinterleave[::2,::2]=mediansamplemap[:,:,0]
+    mediansampleinterleave[::2,1::2]=mediansamplemap[:,:,1]
+    mediansampleinterleave[1::2,::2]=mediansamplemap[:,:,2]
+    mediansampleinterleave[1::2,1::2]=mediansamplemap[:,:,3]
+
+    meansampleinterleave = np.zeros((2.0*(len(decbins)-1), 2.0*(len(rabins)-1)))
+    meansampleinterleave[::2,::2]=meansamplemap[:,:,0]
+    meansampleinterleave[::2,1::2]=meansamplemap[:,:,1]
+    meansampleinterleave[1::2,::2]=meansamplemap[:,:,2]
+    meansampleinterleave[1::2,1::2]=meansamplemap[:,:,3]
+
+    sigmasampleinterleave = np.zeros((2.0*(len(decbins)-1), 2.0*(len(rabins)-1)))
+    sigmasampleinterleave[::2,::2]=sigmasamplemap[:,:,0]
+    sigmasampleinterleave[::2,1::2]=sigmasamplemap[:,:,1]
+    sigmasampleinterleave[1::2,::2]=sigmasamplemap[:,:,2]
+    sigmasampleinterleave[1::2,1::2]=sigmasamplemap[:,:,3]
+
+    # calculate range, tweaking boundaries to deal with smaller binsize. Preserves bin centers.
+    raextent = [rabins[0] + 0.25*(rabins[1]-rabins[0]), 
+                rabins[-1] + 0.25*(rabins[1]-rabins[0])] 
+    decextent = [decbins[0] + 0.25*(decbins[1]-decbins[0]), 
+                 decbins[-1] + 0.25*(decbins[1]-decbins[0])] 
+    rainterleavebins = np.linspace(raextent[0], raextent[1], 2.0*(len(rabins)-1)+1)
+    decinterleavebins = np.linspace(decextent[0], decextent[1], 2.0*(len(decbins)-1)+1)
+    print 'RA Extent: ', raextent
+    print 'Dec Extent: ', decextent
+    rarange=[np.min(rabins), ramax]
+    decrange=[decmin, decmax]
+    plotregion = [np.mean(rarange), np.mean(decrange), 
+                  (rarange[1]-rarange[0])*np.cos(np.mean(decrange)*np.pi/180.), 
+                  (decrange[1]-decrange[0])]
+    print 'Plotregion: ', plotregion
+
+    # write out files
+
+    if (write_fits):
+
+        imgtypestr = '.median'
+        imgname = medianinterleave
+        outputfits = '../orion_interleave' + imgtypestr + '.fits'
+        if op.isfile(outputfits):
+            print 'Deleting ', outputfits,' before remaking...'
+            os.remove(outputfits)
+        make_fits_image(outputfits, imgname.T, 
+                        rainterleavebins, decinterleavebins)
+            
+        imgtypestr = '.mean'
+        imgname = meaninterleave
+        outputfits = '../orion_interleave' + imgtypestr + '.fits'
+        if op.isfile(outputfits):
+            print 'Deleting ', outputfits,' before remaking...'
+            os.remove(outputfits)
+        make_fits_image(outputfits, imgname.T, 
+                        rainterleavebins, decinterleavebins)
+
+        imgtypestr = '.sigma'
+        imgname = sigmainterleave
+        outputfits = '../orion_interleave' + imgtypestr + '.fits'
+        if op.isfile(outputfits):
+            print 'Deleting ', outputfits,' before remaking...'
+            os.remove(outputfits)
+        make_fits_image(outputfits, imgname.T, 
+                        rainterleavebins, decinterleavebins)
+
+        imgtypestr = '.median.sample.%03d' % n_sample_per_box
+        imgname = mediansampleinterleave
+        outputfits = '../orion_interleave' + imgtypestr + '.fits'
+        if op.isfile(outputfits):
+            print 'Deleting ', outputfits,' before remaking...'
+            os.remove(outputfits)
+        make_fits_image(outputfits, imgname.T, 
+                        rainterleavebins, decinterleavebins)
+
+        imgtypestr = '.mean.sample.%03d' % n_sample_per_box
+        imgname = meansampleinterleave
+        outputfits = '../orion_interleave' + imgtypestr + '.fits'
+        if op.isfile(outputfits):
+            print 'Deleting ', outputfits,' before remaking...'
+            os.remove(outputfits)
+        make_fits_image(outputfits, imgname.T, 
+                        rainterleavebins, decinterleavebins)
+
+        imgtypestr = '.sigma.sample.%03d' % n_sample_per_box
+        imgname = sigmasampleinterleave
+        outputfits = '../orion_interleave' + imgtypestr + '.fits'
+        if op.isfile(outputfits):
+            print 'Deleting ', outputfits,' before remaking...'
+            os.remove(outputfits)
+        make_fits_image(outputfits, imgname.T, 
+                        rainterleavebins, decinterleavebins)
+
+    #-----------------------------------
+    # Plot results....
+
+    print 'Set font size...'
+    
+    font = {'weight': '500',
+            'size': '20'}
+    plt.rc('font', **font)
+    figsize=(8.5,10.5)
+
+    # make plot of Orion, with Brick 15 stars overlaid
+
+    gc = aplpy.FITSFigure(orion_file, 
+                          figsize=figsize,
+                          north='True')
+    gc.tick_labels.set_font(size=10)
+    gc.show_colorscale(vmin=0, vmax=5, cmap='hot', 
+                       interpolation='nearest')
+    r = plotregion
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    gc.add_grid()
+    gc.grid.set_alpha(0.9)
+    gc.grid.set_xspacing(dra)
+    gc.grid.set_yspacing(ddec)
+
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(r'$A_V$')
+
+    gc.hide_xaxis_label()
+    gc.hide_yaxis_label()
+
+    # plot star locations
+    
+    if (plot_stars):
+        datadir = '/astro/store/angst4/dstn/v8/'  # bagel
+        datadir = '/mnt/angst4/dstn/v8/'          # chex
+        datadir = '../../Data/'                   # poptart
+        datafile = datadir + 'ir-sf-b15-v8-st.fits'
+        m1, m2, ra, dec = rbd.read_mag_position_gst(datafile)
+        
+        crange    = [0.35,3.5]        # range of colors to use in CMD fitting
+        c = m1 - m2
+        m = m2
+        
+        # exclude data outside the color-magnitude range
+        
+        igood = ((c >= crange[0]) & (c <= crange[1]) &
+                 (m >= 18.5))
+        m = m[igood]
+        c = c[igood]
+        ra = ra[igood]
+        dec = dec[igood]
+        m_faint = np.max(m)
+        m_median = np.median(m)
+        m_percentile = np.percentile(m,[5., 10., 25., 50., 75., 80., 90., 95.])
+        print 'Faintest mag: ', m_faint
+        print 'Median mag: ', m_median
+        print 'Percentile mags: ', m_percentile
+        igood = (m <= np.percentile(m,[80.]))
+        m = m[igood]
+        c = c[igood]
+        ra = ra[igood]
+        dec = dec[igood]
+
+        gc.show_markers(ra, dec, edgecolor='black', facecolor='#19FF28', marker=(5,1), s=20, linewidth=0.5)
+
+    outputimgfile = '../orion_original_image' + imgexten
+    gc.save(outputimgfile, adjust_bbox='True')
+    print 'Wrote image: ', outputimgfile
+
+    #-----------------
+    # make plot of Orion, with AV histograms overlaid
+
+    plt.figure(10)
+    plt.close()
+    fig = plt.figure(10, figsize=figsize)
+    gc = aplpy.FITSFigure(orion_file, 
+                          figure=fig,
+                          north='True')
+    gc.tick_labels.set_font(size=10)
+    gc.show_grayscale(vmin=0, vmax=5, 
+                      interpolation='nearest')
+    r = plotregion
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    # record position of figure, and interpolate to get plot boundaries
+    ax = fig.gca()
+    bbox = ax.get_position()
+    rect_img = np.array(bbox.bounds)
+    xrange = np.array([rect_img[0], rect_img[0] + rect_img[2]])
+    xrangerev = np.array([rect_img[0] + rect_img[2], rect_img[0]])
+    yrange = np.array([rect_img[1], rect_img[1] + rect_img[3]])
+    rafigrange = np.array([ramin, ramax])    
+    decfigrange = np.array([decmin, decmax])
+    #xbins = np.interp(rabins, rafigrange, xrangerev)
+    #ybins = np.interp(decbins, decfigrange, yrange)
+    print 'RA fig range:  ', rafigrange
+    print 'Dec fig range: ', decfigrange
+    print 'xrange:        ', xrangerev
+    print 'yrange:        ', yrange
+    
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(r'$A_V$')
+
+    gc.hide_xaxis_label()
+    gc.hide_yaxis_label()
+
+    # look through ra, dec intervals, plotting histogram internally
+
+    #for j_ra in np.arange(len(rabins[:-1])):
+    for j_ra in np.arange(3):
+        for j_dec in np.arange(len(decbins[:-1])):
+
+            xbinrange = np.interp([rabins[j_ra + 1], rabins[j_ra]],
+                                   rafigrange, xrangerev)
+            ybinrange = np.interp([decbins[j_dec], decbins[j_dec + 1]],
+                                   decfigrange, yrange)
+
+            #print j_ra, j_dec, xbinrange, ybinrange
+
+            rect = [xbinrange[0], ybinrange[0],
+                    xbinrange[1] - xbinrange[0],
+                    ybinrange[1] - ybinrange[0]]
+
+            ax = fig.add_axes(rect)
+            ax.plot(AVbincen, AVhistmap[j_dec, j_ra, :].flatten(), color='black',
+                    linewidth=5.25)
+            ax.plot(AVbincen, AVhistmap[j_dec, j_ra, :].flatten(), color='yellow',
+                    linewidth=4)
+            ax.set_xlim([0,5])
+            ax.get_xaxis().set_visible(False)
+            ax.get_yaxis().set_visible(False)
+            ax.patch.set_alpha(0.0)
+
+    fig.draw
+
+    # commented out because not *quite* exact. Very close though.
+    #gc.add_grid()
+    #gc.grid.set_alpha(0.9)
+    #gc.grid.set_xspacing(dra)
+    #gc.grid.set_yspacing(ddec)
+
+    outputimgfile = '../orion_original_image_AVhistograms' + imgexten
+    fig.savefig(outputimgfile, adjust_bbox='True', transparent=False)
+    print 'Wrote image: ', outputimgfile
+
+    #-----------------
+    # make plot of Orion, with AV histograms overlaid
+
+    plt.figure(11)
+    plt.close()
+    fig = plt.figure(11, figsize=figsize)
+    gc = aplpy.FITSFigure(orion_file, 
+                          figure=fig,
+                          north='True')
+    gc.tick_labels.set_font(size=10)
+    gc.show_grayscale(vmin=0, vmax=5, 
+                      interpolation='nearest')
+    r = plotregion
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+
+    # record position of figure, and interpolate to get plot boundaries
+    ax = fig.gca()
+    bbox = ax.get_position()
+    rect_img = np.array(bbox.bounds)
+    xrange = np.array([rect_img[0], rect_img[0] + rect_img[2]])
+    xrangerev = np.array([rect_img[0] + rect_img[2], rect_img[0]])
+    yrange = np.array([rect_img[1], rect_img[1] + rect_img[3]])
+    rafigrange = np.array([ramin, ramax])    
+    decfigrange = np.array([decmin, decmax])
+    #xbins = np.interp(rabins, rafigrange, xrangerev)
+    #ybins = np.interp(decbins, decfigrange, yrange)
+    print 'RA fig range:  ', rafigrange
+    print 'Dec fig range: ', decfigrange
+    print 'xrange:        ', xrangerev
+    print 'yrange:        ', yrange
+    
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(r'$A_V$')
+
+    gc.hide_xaxis_label()
+    gc.hide_yaxis_label()
+
+    # look through ra, dec intervals, plotting histogram internally
+
+    #for j_ra in np.arange(len(rabins[:-1])):
+    for j_ra in np.arange(3):
+        for j_dec in np.arange(len(decbins[:-1])):
+
+            xbinrange = np.interp([rabins[j_ra + 1], rabins[j_ra]],
+                                   rafigrange, xrangerev)
+            ybinrange = np.interp([decbins[j_dec], decbins[j_dec + 1]],
+                                   decfigrange, yrange)
+
+            #print j_ra, j_dec, xbinrange, ybinrange
+
+            rect = [xbinrange[0], ybinrange[0],
+                    xbinrange[1] - xbinrange[0],
+                    ybinrange[1] - ybinrange[0]]
+
+            ax = fig.add_axes(rect)
+            ax.plot(AVbincen, AVcumemap[j_dec, j_ra, :].flatten(), color='white',
+                    linewidth=5.25)
+            ax.plot(AVbincen, AVcumemap[j_dec, j_ra, :].flatten(), color='red',
+                    linewidth=4)
+            ax.set_xlim([0,5])
+            ax.set_ylim([0,1])
+            ax.get_xaxis().set_visible(False)
+            ax.get_yaxis().set_visible(False)
+            ax.patch.set_alpha(0.0)
+
+    fig.draw
+
+    # commented out because not *quite* exact. Very close though.
+    #gc.add_grid()
+    #gc.grid.set_alpha(0.9)
+    #gc.grid.set_xspacing(dra)
+    #gc.grid.set_yspacing(ddec)
+
+    outputimgfile = '../orion_original_image_AVcumulative' + imgexten
+    fig.savefig(outputimgfile, adjust_bbox='True', transparent=False)
+    print 'Wrote image: ', outputimgfile
+
+    return
+
+    #----------------------------
+    # display interleaved images
+
+    imgtypestr = '.median'
+    imglabel = r'$\widetilde{A_V}$'
+    vrange = [0, 5]
+    outputfits = '../orion_interleave' + imgtypestr + '.fits'
+    outputimgfile = '../orion_interleave' + imgtypestr + imgexten
+    gc = aplpy.FITSFigure(outputfits, 
+                          figsize=figsize,
+                          north='True')
+    gc.tick_labels.set_font(size=10)
+    gc.show_colorscale(vmin=vrange[0], vmax=vrange[1], cmap='hot', 
+                       interpolation='nearest')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(imglabel)
+    gc.hide_xaxis_label()
+    gc.hide_yaxis_label()
+    gc.add_grid()
+    gc.grid.set_alpha(0.9)
+    gc.grid.set_xspacing(dra)
+    gc.grid.set_yspacing(ddec)
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+    gc.save(outputimgfile, adjust_bbox='True')
+    print 'Wrote image: ', outputimgfile
+
+    imgtypestr = '.mean'
+    imglabel = r'$\langle A_V \rangle$'
+    vrange = [0, 5]
+    outputfits = '../orion_interleave' + imgtypestr + '.fits'
+    outputimgfile = '../orion_interleave' + imgtypestr + imgexten
+    gc = aplpy.FITSFigure(outputfits, 
+                          figsize=figsize,
+                          north='True')
+    gc.tick_labels.set_font(size=10)
+    gc.show_colorscale(vmin=vrange[0], vmax=vrange[1], cmap='hot', 
+                       interpolation='nearest')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(imglabel)
+    gc.hide_xaxis_label()
+    gc.hide_yaxis_label()
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+    gc.save(outputimgfile, adjust_bbox='True')
+    print 'Wrote image: ', outputimgfile
+
+    imgtypestr = '.sigma'
+    imglabel = r'$\sigma$'
+    vrange = [0, 1.0]
+    outputfits = '../orion_interleave' + imgtypestr + '.fits'
+    outputimgfile = '../orion_interleave' + imgtypestr + imgexten
+    gc = aplpy.FITSFigure(outputfits, 
+                          figsize=figsize,
+                          north='True')
+    gc.tick_labels.set_font(size=10)
+    gc.show_colorscale(vmin=vrange[0], vmax=vrange[1], cmap='hot', 
+                       interpolation='nearest')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(imglabel)
+    gc.hide_xaxis_label()
+    gc.hide_yaxis_label()
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+    gc.save(outputimgfile, adjust_bbox='True')
+    print 'Wrote image: ', outputimgfile
+
+    #--- sampled images
+    imgtypestr = '.median.sample.%03d' % n_sample_per_box
+    imglabel = r'$\widetilde{A_V}$    $\langle N_{samp} \rangle=%-3d$' % n_sample_per_box
+    vrange = [0, 5]
+    outputfits = '../orion_interleave' + imgtypestr + '.fits'
+    outputimgfile = '../orion_interleave' + imgtypestr + imgexten
+    gc = aplpy.FITSFigure(outputfits, 
+                          figsize=figsize,
+                          north='True')
+    gc.tick_labels.set_font(size=10)
+    gc.show_colorscale(vmin=vrange[0], vmax=vrange[1], cmap='hot', 
+                       interpolation='nearest')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(imglabel)
+    gc.hide_xaxis_label()
+    gc.hide_yaxis_label()
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+    gc.save(outputimgfile, adjust_bbox='True')
+    print 'Wrote image: ', outputimgfile
+
+    imgtypestr = '.mean.sample.%03d' % n_sample_per_box
+    imglabel = r'$\langle A_V \rangle$    $\langle N_{samp} \rangle=%-3d$' % n_sample_per_box
+    vrange = [0, 5]
+    outputfits = '../orion_interleave' + imgtypestr + '.fits'
+    outputimgfile = '../orion_interleave' + imgtypestr + imgexten
+    gc = aplpy.FITSFigure(outputfits, 
+                          figsize=figsize,
+                          north='True')
+    gc.tick_labels.set_font(size=10)
+    gc.show_colorscale(vmin=vrange[0], vmax=vrange[1], cmap='hot', 
+                       interpolation='nearest')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(imglabel)
+    gc.hide_xaxis_label()
+    gc.hide_yaxis_label()
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+    gc.save(outputimgfile, adjust_bbox='True')
+    print 'Wrote image: ', outputimgfile
+
+    imgtypestr = '.sigma.sample.%03d' % n_sample_per_box
+    imglabel = r'$\sigma$    $\langle N_{samp} \rangle=%-3d$' % n_sample_per_box
+    vrange = [0, 1.0]
+    outputfits = '../orion_interleave' + imgtypestr + '.fits'
+    outputimgfile = '../orion_interleave' + imgtypestr + imgexten
+    gc = aplpy.FITSFigure(outputfits, 
+                          figsize=figsize,
+                          north='True')
+    gc.tick_labels.set_font(size=10)
+    gc.show_colorscale(vmin=vrange[0], vmax=vrange[1], cmap='hot', 
+                       interpolation='nearest')
+    gc.add_colorbar()
+    gc.colorbar.set_width(0.15)
+    gc.colorbar.set_location('right')
+    gc.colorbar.set_axis_label_text(imglabel)
+    gc.hide_xaxis_label()
+    gc.hide_yaxis_label()
+    gc.recenter(r[0], r[1], width=r[2], height=r[3])
+    gc.save(outputimgfile, adjust_bbox='True')
+    print 'Wrote image: ', outputimgfile
+
+    # restore font size
+
+    print 'Restoring original font defaults...'
+    plt.rcdefaults()
+    
+    return
+
+
+
 # custom colormap, based on http://li248-5.members.linode.com/
 # using implementation from http://wiki.scipy.org/Cookbook/Matplotlib/Show_colormaps
 
@@ -5990,10 +6766,10 @@ cdict = {'red': ((0.0,  1.0,  1.0),
                   (0.95, 0.25,  0.25),
                   (1.0,  0.0,  0.0))}
 myblues = colors.LinearSegmentedColormap('my_colormap',cdict,256)
-plt.figure(1)
+#plt.figure(1)
 rndfield = np.random.rand(10,10)
-im = plt.pcolor(rndfield, cmap=myblues)
-plt.colorbar(im)
+#im = plt.pcolor(rndfield, cmap=myblues)
+#plt.colorbar(im)
 
 # alternate seismic that goes to black at the edges
 cdict = {'red': ((0.0,  0.0,  0.0),
@@ -6018,11 +6794,166 @@ cdict = {'red': ((0.0,  0.0,  0.0),
                   (0.85, 0.0,  0.0),
                   (1.0,  0.0,  0.0))}
 myseismic = colors.LinearSegmentedColormap('my_colormap',cdict,256)
-plt.figure(2)
-im = plt.pcolor(rndfield, cmap=myseismic)
-plt.colorbar(im)
+#plt.figure(2)
+#im = plt.pcolor(rndfield, cmap=myseismic)
+#plt.colorbar(im)
 
-plt.figure(3)
-im = plt.pcolor(rndfield, cmap='seismic')
-plt.colorbar(im)
+#plt.figure(3)
+#im = plt.pcolor(rndfield, cmap='seismic')
+#plt.colorbar(im)
+
+# alternate white to blues to purple to black
+cdict = {'red': ((0.0,  1.0,  1.0),
+                 (0.25, 0.5,  0.5),
+                 (0.5,  0.75, 0.75),
+                 (0.75, 0.625,0.625),
+                 (0.85, 0.5,  0.5),
+                 (1.0,  0.0,  0.0)),
+         'green': ((0.0,  1.0,   1.0),
+                   (0.25, 0.75,  0.75),
+                   (0.5,  0.325, 0.325),
+                   (0.75, 0.0,   0.0),
+                   (1.0,  0.0,   0.0)),
+         'blue': ((0.0,  1.0,  1.0),
+                  (0.25, 1.0,  1.0),
+                  (0.5,  1.0,  1.0),
+                  (0.75, 0.8,  0.8),
+                  (0.9,  0.6,  0.6),
+                  (1.0,  0.0,  0.0))}
+mycool = colors.LinearSegmentedColormap('my_colormap',cdict,256)
+#plt.figure(5)
+#im = plt.pcolor(rndfield, cmap=mycool)
+#plt.colorbar(im)
+
+# alternate white to blues to purple to black
+cdict = {'red': ((0.0,  1.0,  1.0),
+                 (0.25, 0.5,  0.5),
+                 (0.5,  0.6,  0.6),
+                 (0.75, 0.375, 0.375),
+                 (1.0,  0.0,  0.0)),
+         'green': ((0.0,  1.0,   1.0),
+                   (0.25, 0.75,  0.75),
+                   (0.5,  0.5,   0.5),
+                   (0.75, 0.25,   0.25),
+                   (1.0,  0.0,   0.0)),
+         'blue': ((0.0,  1.0,  1.0),
+                  (0.25, 1.0,  1.0),
+                  (0.5,  0.825, 0.825),
+                  (0.75, 0.75,  0.75),
+                  (0.95,  0.5,  0.5),
+                  (1.0,  0.0,  0.0))}
+mycool2 = colors.LinearSegmentedColormap('my_colormap',cdict,256)
+#plt.figure(6)
+#im = plt.pcolor(rndfield, cmap=mycool2)
+#plt.colorbar(im)
+
+# alternate white to blues to purple to black
+cdict = {'red': ((0.0,  1.0,  1.0),
+                 (0.25, 0.5,  0.5),
+                 (0.5,  0.375,  0.375),
+                 (0.75, 0.3, 0.3),
+                 (1.0,  0.0,  0.0)),
+         'green': ((0.0,  1.0,   1.0),
+                   (0.25, 0.7,  0.7),
+                   (0.5,  0.3,   0.3),
+                   (0.75, 0.125,   0.125),
+                   (1.0,  0.0,   0.0)),
+         'blue': ((0.0,  1.0,  1.0),
+                  (0.25, 0.875,  0.875),
+                  (0.5,  0.8,    0.8),
+                  (0.75, 0.625,  0.625),
+                  (0.95,  0.3,  0.3),
+                  (1.0,  0.0,  0.0))}
+mycool3 = colors.LinearSegmentedColormap('my_colormap',cdict,256)
+#plt.figure(7)
+#im = plt.pcolor(rndfield, cmap=mycool3)
+#plt.colorbar(im)
+
+# blue to purple to orange
+cdict = {'red': ((0.0,  0.000, 0.000),
+                 (0.3, 0.472, 0.472),
+                 (0.4,  0.631, 0.631),
+                 (0.75, 0.820, 0.820),
+                 (1.0,  1.000, 1.000)),
+         'green': ((0.0,  0.298, 0.298 ),
+                   (0.3, 0.286, 0.286 ),
+                   (0.4,  0.219, 0.219 ),
+                   (0.75, 0.008, 0.008 ),
+                   (1.0,  0.627, 0.627 )),
+         'blue': ((0.0,  0.631, 0.631 ),
+                  (0.3, 0.855, 0.855 ),
+                  (0.4,  0.847, 0.847 ),
+                  (0.75, 0.212, 0.212 ),
+                  (1.0,  0.0,   0.0   ))}
+myblpuor = colors.LinearSegmentedColormap('my_colormap',cdict,256)
+#plt.figure(8)
+#im = plt.pcolor(rndfield, cmap=myblpuor)
+#plt.colorbar(im)
+
+# blue to green (switchup of myblpuor
+cdict = {'red': ((0.0,  0.098, 0.098 ), 
+                 (0.3, 0.286, 0.286 ),  
+                 (0.4,  0.219, 0.219 ), 
+                 (0.75, 0.008, 0.008 ), 
+                 (1.0,  0.627, 0.627 )),
+         'green': ((0.0,  0.000, 0.000), 
+                   (0.3, 0.472, 0.472),  
+                   (0.4,  0.631, 0.631), 
+                   (0.75, 0.820, 0.820), 
+                   (1.0,  1.000, 1.000)),
+         'blue': ((0.0,  0.561, 0.561 ),
+                  (0.3, 0.855, 0.855 ),
+                  (0.4,  0.847, 0.847 ),
+                  (0.75, 0.212, 0.212 ),
+                  (1.0,  0.0,   0.0   ))}
+myblgr = colors.LinearSegmentedColormap('my_colormap',cdict,256)
+#plt.figure(9)
+#im = plt.pcolor(rndfield, cmap=myblgr)
+#plt.colorbar(im)
+
+# blue to purple to orange
+cdict = {'red': ((0.0,  0.561, 0.561),
+                 (0.3,  0.855, 0.855),
+                 (0.4,  0.859, 0.859),
+                 (0.75, 0.459, 0.459),
+                 (1.0,  0.000, 0.000)),
+         'green': ((0.0,  0.098, 0.098 ),
+                   (0.3,  0.286, 0.286 ),
+                   (0.4,  0.219, 0.219 ),
+                   (0.75, 0.008, 0.008 ),
+                   (1.0,  0.749, 0.749 )),
+         'blue': ((0.0,  0.000, 0.000 ),
+                  (0.3,  0.472, 0.472 ),
+                  (0.4,  0.631, 0.631 ),
+                  (0.75, 0.820, 0.820 ),
+                  (1.0,  1.000, 1.000 ))}
+myrdpubl = colors.LinearSegmentedColormap('my_colormap',cdict,256)
+#plt.figure(10)
+#im = plt.pcolor(rndfield, cmap=myrdpubl)
+#plt.colorbar(im)
+
+# blue to purple to orange
+cdict = {'red': ((0.00,  0.898,  0.898),
+                 (0.35,  0.619,  0.619),
+                 (0.50,  0.501,  0.501),
+                 (0.75,  0.274,  0.274),
+                 (1.00,  0.000,  0.000)),
+         'green': ((0.00,  0.000,  0.000 ),
+                   (0.25,  0.000,  0.000 ),
+                   (0.50,  0.009,  0.009 ),
+                   (0.75,  0.000,  0.000 ),
+                   (1.00,  0.549,  0.549 )),
+         'blue': ((0.00,  0.000,  0.000 ),
+                  (0.35,  0.667,  0.667 ),
+                  (0.50,  0.596,  0.596 ),
+                  (0.75,  0.765,  0.765 ),
+                  (1.00,  1.000,  1.000 ))}
+myrdbl = colors.LinearSegmentedColormap('my_colormap',cdict,256)
+#plt.figure(11)
+#im = plt.pcolor(rndfield, cmap=myrdbl)
+#plt.colorbar(im)
+
+
+
+
 
